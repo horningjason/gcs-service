@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  POST this to /Gcs/v1/Geocode (strict i3) or /Gcs/v1/GeocodeEnhanced
+  (i3-improved). 2800 Del Rio Drive is deliberately NOT a
+  SiteStructureAddressPoint in data/data.gpkg (the street's points jump
+  2728 -> 2801), but it falls inside a RoadCenterLine segment's range
+  (evens 2700-2898, right side) with matching parity. The correct answer
+  is therefore a rung-2 INTERPOLATED_POINT on Del Rio Drive.
+
+  This is the case that motivated spec decision 70 (the comparative
+  ladder): decision 69's house-number gate admits every address point in
+  the deployment numbered 2800 — dozens of them, all on the wrong street —
+  and with a low GCS_MIN_MATCH_SCORE that non-empty rung 1 used to shadow
+  the road search entirely, so the exactly-matching segment was never
+  scored. Decision 70 makes the rungs compete on blended confidence: the
+  perfect interpolation (matchScore 100 x INTERPOLATED_POINT ceiling 75)
+  beats every wrong-street point, and Del Rio Drive comes back regardless
+  of where the floor is set.
+
+  See README.md's "Try it" section for the curl command.
+-->
+<presence xmlns="urn:ietf:params:xml:ns:pidf"
+          xmlns:dm="urn:ietf:params:xml:ns:pidf:data-model"
+          xmlns:gp="urn:ietf:params:xml:ns:pidf:geopriv10"
+          entity="pres:test@example.com">
+  <tuple id="t1">
+    <status>
+      <gp:geopriv>
+        <gp:location-info>
+          <ca:civicAddress xmlns:ca="urn:ietf:params:xml:ns:pidf:geopriv10:civicAddr">
+            <ca:country>US</ca:country>
+            <ca:A1>ND</ca:A1>
+            <ca:A2>Burleigh County</ca:A2>
+            <ca:A3>Bismarck</ca:A3>
+            <ca:RD>Del Rio</ca:RD>
+            <ca:STS>Drive</ca:STS>
+            <ca:HNO>2800</ca:HNO>
+            <ca:PC>58503</ca:PC>
+          </ca:civicAddress>
+        </gp:location-info>
+        <gp:usage-rules/>
+      </gp:geopriv>
+    </status>
+  </tuple>
+</presence>

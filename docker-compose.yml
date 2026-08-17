@@ -1,0 +1,39 @@
+services:
+  gcs:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      # Optional: mount a local data/ folder to override the included
+      # GeoPackage or supply your own. Remove this entry to use only the
+      # baked-in data.
+      - ./data:/app/data
+      # TLS: mount your node's cert directory into /app/certs (read-only).
+      # Use the full path — Docker Compose does not reliably expand ~.
+      # - /path/to/certs/gcs:/app/certs:ro
+    env_file:
+      - .env
+    environment:
+      # Per-machine multi-worker. Work is CPU-bound (geodesic distance and
+      # per-field similarity over the candidate set), so a reasonable starting
+      # point is roughly the number of CPU cores, then measure.
+      GCS_WORKERS: "2"
+      # TLS config — see .env.example
+      # GCS_TLS_MODE:
+      # GCS_TLS_CERT_FILE:
+      # GCS_TLS_KEY_FILE:
+      # GCS_TLS_CA_FILE:
+    restart: unless-stopped
+    healthcheck:
+      # /ready, not /health — /health is liveness and stays 200 while GIS data
+      # is reloading; /ready reports 503 so traffic is held off (spec §3.9.4).
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/ready').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1.0"

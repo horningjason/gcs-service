@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  POST this to /Gcs/v1/ReverseGeocode or /Gcs/v1/ReverseGeocodeEnhanced.
+  The coordinate is the address point for 2708 Stevens Street, Bismarck, ND
+  (see geocode_civic_address.xml) — reversing it should hand that same
+  address back (spec §14.1's round-trip expectation). Note GML/RFC 5491
+  coordinate order is latitude then longitude. See README.md for the curl
+  command.
+-->
+<presence xmlns="urn:ietf:params:xml:ns:pidf"
+          xmlns:dm="urn:ietf:params:xml:ns:pidf:data-model"
+          xmlns:gp="urn:ietf:params:xml:ns:pidf:geopriv10"
+          entity="pres:test@example.com">
+  <tuple id="t1">
+    <status>
+      <gp:geopriv>
+        <gp:location-info>
+          <gml:Point xmlns:gml="http://www.opengis.net/gml"
+                     srsName="urn:ogc:def:crs:EPSG::4326">
+            <gml:pos>46.83568676 -100.80216135</gml:pos>
+          </gml:Point>
+        </gp:location-info>
+        <gp:usage-rules/>
+      </gp:geopriv>
+    </status>
+  </tuple>
+</presence>

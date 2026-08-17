@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  POST this to /Gcs/v1/ReverseGeocodeEnhanced (or the strict
+  /Gcs/v1/ReverseGeocode, which will return rank 1 of the same ordering).
+  Same location as reverse_point.xml, but as a 100 m gs:Circle instead of a
+  bare gml:Point. Demonstrates §9's non-Point shapes and §10.6's
+  extent-damping term (a vaguer query shape scores lower even when it
+  still contains the same nearest feature). Expect several candidates:
+  the search still runs out to GCS_REVERSE_SEARCH_RADIUS_M regardless of
+  the circle's own radius (§10.1); the circle only affects containment and
+  the score, not how far the search looks. See README.md for the curl
+  command.
+-->
+<presence xmlns="urn:ietf:params:xml:ns:pidf"
+          xmlns:dm="urn:ietf:params:xml:ns:pidf:data-model"
+          xmlns:gp="urn:ietf:params:xml:ns:pidf:geopriv10"
+          entity="pres:test@example.com">
+  <tuple id="t1">
+    <status>
+      <gp:geopriv>
+        <gp:location-info>
+          <gs:Circle xmlns:gs="http://www.opengis.net/pidflo/1.0"
+                     xmlns:gml="http://www.opengis.net/gml"
+                     srsName="urn:ogc:def:crs:EPSG::4326">
+            <gml:pos>46.8357 -100.8022</gml:pos>
+            <gs:radius uom="urn:ogc:def:uom:EPSG::9001">100</gs:radius>
+          </gs:Circle>
+        </gp:location-info>
+        <gp:usage-rules/>
+      </gp:geopriv>
+    </status>
+  </tuple>
+</presence>

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  POST this to /Gcs/v1/Geocode (strict i3) or /Gcs/v1/GeocodeEnhanced
+  (i3-improved). 2801 Del Rio Drive is a real SiteStructureAddressPoint in
+  data/data.gpkg, so this exercises a rung-1 exact address-point match.
+  (2800 is NOT an address point on this street — that case lives in
+  geocode_interpolated_point.xml and exercises rung-2 interpolation.)
+
+  See README.md's "Try it" section for the curl command. Both endpoints
+  return a clean ADDRESS_POINT match; the enhanced endpoint additionally
+  shows the ranked, scored candidate list and per-field breakdown the
+  strict interface does not expose.
+-->
+<presence xmlns="urn:ietf:params:xml:ns:pidf"
+          xmlns:dm="urn:ietf:params:xml:ns:pidf:data-model"
+          xmlns:gp="urn:ietf:params:xml:ns:pidf:geopriv10"
+          entity="pres:test@example.com">
+  <tuple id="t1">
+    <status>
+      <gp:geopriv>
+        <gp:location-info>
+          <ca:civicAddress xmlns:ca="urn:ietf:params:xml:ns:pidf:geopriv10:civicAddr">
+            <ca:country>US</ca:country>
+            <ca:A1>ND</ca:A1>
+            <ca:A2>Morton County</ca:A2>
+            <ca:A3>Mandan</ca:A3>
+            <ca:RD>12th</ca:RD>
+            <ca:STS>Avenue</ca:STS>
+            <ca:POD>Northwest</ca:POD>
+            <ca:HNO>802</ca:HNO>
+          </ca:civicAddress>
+        </gp:location-info>
+        <gp:usage-rules/>
+      </gp:geopriv>
+    </status>
+  </tuple>
+</presence>

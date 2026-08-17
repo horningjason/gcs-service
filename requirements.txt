@@ -1,0 +1,35 @@
+# i3 shared core (pinned to GitHub tag) — same pin LVF currently carries.
+# Bump the tag and re-pin deliberately; see CLAUDE.md.
+i3-fe-core @ git+https://github.com/horningjason/i3-fe-core.git@v0.4.0
+
+# Core service
+fastapi==0.136.1
+uvicorn==0.46.0
+gunicorn==23.0.0
+python-dotenv==1.2.2
+pydantic==2.13.4
+lxml==6.1.0
+
+# Metrics
+prometheus_client==0.25.0
+
+# GIS / spatial
+geopandas==1.1.3
+shapely==2.1.2
+pyogrio==0.12.1
+
+# NTP
+ntplib==0.4.0
+
+# SIP
+sipmessage==0.7.1
+
+# Testing
+pytest==9.0.3
+httpx==0.28.1
+
+# NOT carried over from LVF:
+#   dnspython — U-NAPTR resolution existed for LVF_PARENT_URI. The GCS has no
+#   parent and no recursion (spec §3.1, §13, decision 4), and GCS_REFERRAL_URI
+#   is a statically configured URI that is emitted verbatim in a 307 Location
+#   header (§3.6.2). Nothing to resolve.

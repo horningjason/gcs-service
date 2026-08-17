@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  POST this to /Gcs/v1/ReverseGeocode or /Gcs/v1/ReverseGeocodeEnhanced.
+  (0, 0) is open water in the Gulf of Guinea, nowhere near North Dakota, so
+  nothing falls within GCS_REVERSE_SEARCH_RADIUS_M and both endpoints
+  return 468 with the reason "No feature fell within
+  GCS_REVERSE_SEARCH_RADIUS_M of the origin." This is exactly the case
+  spec §10.2 requires a mandatory search radius to guard against: without
+  one, this point would reverse-geocode to whatever unfortunate address is
+  nearest and return 200. See README.md for the curl command.
+-->
+<presence xmlns="urn:ietf:params:xml:ns:pidf"
+          xmlns:dm="urn:ietf:params:xml:ns:pidf:data-model"
+          xmlns:gp="urn:ietf:params:xml:ns:pidf:geopriv10"
+          entity="pres:test@example.com">
+  <tuple id="t1">
+    <status>
+      <gp:geopriv>
+        <gp:location-info>
+          <gml:Point xmlns:gml="http://www.opengis.net/gml"
+                     srsName="urn:ogc:def:crs:EPSG::4326">
+            <gml:pos>0.0 0.0</gml:pos>
+          </gml:Point>
+        </gp:location-info>
+        <gp:usage-rules/>
+      </gp:geopriv>
+    </status>
+  </tuple>
+</presence>

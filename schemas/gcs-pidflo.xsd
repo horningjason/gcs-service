@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  GCS master validation schema.
+
+  This file declares no elements of its own. It exists solely to pull every
+  namespace a GCS PIDF-LO can legitimately contain into ONE compiled schema,
+  so that lxml validates the whole document rather than stopping at the first
+  extension point.
+
+  WHY IT IS NECESSARY
+
+  RFC 4119's <location-info> declares its content as
+      <xs:any namespace="##other" processContents="lax"/>
+  and RFC 3863's <presence>/<tuple>/<status> do the same. Under "lax", a
+  validator checks a foreign-namespace element only if it already holds a
+  declaration for it, and silently accepts it otherwise. Compiling pidf.xsd
+  alone would therefore accept literally any civic or geodetic payload —
+  including a malformed one — and GCS spec §4.1 requires schema-invalid
+  requests to return 454.
+
+  This is the direct analogue of LVF's lost1.xsd, which imports its five
+  sibling schemas for exactly the same reason.
+
+  COVERAGE
+
+  Civic side (Geocode input / ReverseGeocode output):
+    RFC 5139 ca:, RFC 6848 cae:, NENA cdx1:, NENA-STA-004.2 cdx2:
+  Geodetic side (Geocode output / ReverseGeocode input):
+    RFC 5491 §4 GML 3.1.1 subset, RFC 5491 §5 GeoShape (all six solids
+    and surfaces), per OGC 06-142r1
+  Envelope (both directions):
+    RFC 3863 pidf:, RFC 4119 geopriv10: + basicPolicy:
+  Quality:
+    RFC 7459 confidence
+
+  Importing gml-geoshape/geometryPrimitives.xsd is sufficient for the whole
+  GML namespace: it includes geometryBasic2d.xsd -> geometryBasic0d1d.xsd ->
+  measures.xsd -> gmlBase.xsd -> basicTypes.xsd, which between them declare
+  gml:Point, gml:LineString, gml:Polygon, gml:LinearRing, gml:pos,
+  gml:posList, gml:exterior, gml:interior and gml:pointProperty.
+
+  See schemas/README.md for per-file provenance.
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           elementFormDefault="qualified">
+
+  <!-- ── Envelope ────────────────────────────────────────────────────── -->
+  <!-- RFC 3863 — <presence>, the document root, and its entity attribute -->
+  <xs:import namespace="urn:ietf:params:xml:ns:pidf"
+             schemaLocation="pidf.xsd"/>
+  <!-- RFC 4119 — <geopriv>, <location-info>, <usage-rules>, <method> -->
+  <xs:import namespace="urn:ietf:params:xml:ns:pidf:geopriv10"
+             schemaLocation="geopriv10.xsd"/>
+  <!-- RFC 4119 — <retransmission-allowed> et al -->
+  <xs:import namespace="urn:ietf:params:xml:ns:pidf:geopriv10:basicPolicy"
+             schemaLocation="basicPolicy.xsd"/>
+
+  <!-- ── Civic side ─────────────────────────────────────────────────── -->
+  <!-- RFC 5139 — base civic address elements (ca:) -->
+  <xs:import namespace="urn:ietf:params:xml:ns:pidf:geopriv10:civicAddr"
+             schemaLocation="civicAddr.xsd"/>
+  <!-- RFC 6848 — IETF civic extensions (cae:) -->
+  <xs:import namespace="urn:ietf:params:xml:ns:pidf:geopriv10:civicAddr:ext"
+             schemaLocation="civicAddr-ext.xsd"/>
+  <!-- NENA legacy CLDXF extensions (cdx1:) — STPS only -->
+  <xs:import namespace="urn:nena:xml:ns:pidf:nenaCivicAddr"
+             schemaLocation="nenaCivicAddr.xsd"/>
+  <!-- NENA-STA-004.2-2024 CLDXF-US extensions (cdx2:) -->
+  <xs:import namespace="urn:nena:xml:ns:pidf:nenaCivicAddr2"
+             schemaLocation="nenaCivicAddr2.xsd"/>
+
+  <!-- ── Geodetic side ──────────────────────────────────────────────── -->
+  <!-- RFC 5491 §4 — GML 3.1.1 PIDF-LO subset (OGC 06-142r1) -->
+  <xs:import namespace="http://www.opengis.net/gml"
+             schemaLocation="gml-geoshape/geometryPrimitives.xsd"/>
+  <!-- RFC 5491 §5 — GeoShape: Circle, Ellipse, ArcBand, Sphere,
+       Ellipsoid, Prism. GCS spec §9 accepts all of these on input. -->
+  <xs:import namespace="http://www.opengis.net/pidflo/1.0"
+             schemaLocation="gml-geoshape/GML-pidf-lo-shape.xsd"/>
+
+  <!-- ── Quality ────────────────────────────────────────────────────── -->
+  <!-- RFC 7459 — <confidence>, carried on both interfaces (§7.4) -->
+  <xs:import namespace="urn:ietf:params:xml:ns:geopriv:conf"
+             schemaLocation="confidence.xsd"/>
+
+</xs:schema>

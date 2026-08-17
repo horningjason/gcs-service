@@ -1,0 +1,49 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+
+# --- Environment / secrets ---
+.env
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# --- GIS data (statewide address data — not for version control) ---
+data/*.gpkg
+data/*.cache.json
+data.gpkg
+*.gpkg-shm
+*.gpkg-wal
+
+# --- Tuning / regression baselines (may contain real address data) ---
+data/sample_pairs.json
+tests/regression/inputs/
+tests/regression/golden/
+
+# --- Logs ---
+*.log
+logs/
+
+# --- OS cruft ---
+.DS_Store
+Thumbs.db
+
+# --- Editor ---
+.idea/
+*.swp
+
+# Note: .vscode/ is intentionally NOT ignored here, matching mcs-service's
+# convention of checking in shared workspace settings. Remove the note above
+# and add ".vscode/" below if you'd rather keep it local-only.

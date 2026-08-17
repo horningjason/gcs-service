@@ -1,0 +1,74 @@
+<?xml version="1.0"?>
+<!--
+  RFC 7459 §7 — PIDF-LO Confidence. Verbatim from the RFC; no
+  localisation needed (this schema imports nothing).
+
+  GCS spec §7.4 populates this element on BOTH interfaces — it is the one
+  piece of the three-field quality model that fits a single i3-defined
+  element. The value is `confidence` = matchScore scaled to the matched
+  tier's fixed ceiling (SPACE_3D 100 / FOOTPRINT_2D 90 / ADDRESS_POINT 80
+  / INTERPOLATED_POINT 75 / STREET_SEGMENT 50).
+
+  Note the schema constrains the decimal form with minExclusive 0.0 and
+  maxExclusive 100.0 — so neither 0 nor 100 is expressible as a number;
+  the only other permitted value is the token "unknown". A SPACE_3D
+  match at a perfect matchScore would compute to exactly 100 and is
+  therefore not serialisable here. SPACE_3D is unreachable today (§7.4,
+  corrected Session 4), so this cannot currently fire, but it is a real
+  boundary condition — logged in spec Appendix C.4.
+-->
+<xs:schema
+    xmlns:conf="urn:ietf:params:xml:ns:geopriv:conf"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    targetNamespace="urn:ietf:params:xml:ns:geopriv:conf"
+    elementFormDefault="qualified"
+    attributeFormDefault="unqualified">
+
+  <xs:annotation>
+    <xs:appinfo
+        source="urn:ietf:params:xml:schema:geopriv:conf">
+      PIDF-LO Confidence
+    </xs:appinfo>
+    <xs:documentation
+        source="http://www.rfc-editor.org/rfc/rfc7459.txt">
+      This schema defines an element that is used for indicating
+      confidence in PIDF-LO documents.
+    </xs:documentation>
+  </xs:annotation>
+
+  <xs:element name="confidence" type="conf:confidenceType"/>
+
+  <xs:complexType name="confidenceType">
+    <xs:simpleContent>
+      <xs:extension base="conf:confidenceBase">
+        <xs:attribute name="pdf" type="conf:pdfType"
+                      default="unknown"/>
+      </xs:extension>
+    </xs:simpleContent>
+  </xs:complexType>
+
+  <xs:simpleType name="confidenceBase">
+    <xs:union>
+      <xs:simpleType>
+        <xs:restriction base="xs:decimal">
+          <xs:minExclusive value="0.0"/>
+          <xs:maxExclusive value="100.0"/>
+        </xs:restriction>
+      </xs:simpleType>
+      <xs:simpleType>
+        <xs:restriction base="xs:token">
+          <xs:enumeration value="unknown"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:union>
+  </xs:simpleType>
+
+  <xs:simpleType name="pdfType">
+    <xs:restriction base="xs:token">
+      <xs:enumeration value="unknown"/>
+      <xs:enumeration value="normal"/>
+      <xs:enumeration value="rectangular"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>

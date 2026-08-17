@@ -1,0 +1,414 @@
+# ADDITIVE DIFF against i3-geocode-conversion.yaml (v1.0, NENA911/Geocode-Conversion-Service)
+#
+# This file adds two sibling resources and their schemas. It does not modify
+# a single line of the normative YAML — /Geocode, /ReverseGeocode, /Versions,
+# GeodeticData, and CivicAddress are untouched. Discovery is via the
+# /Versions "vendor" parameter (§3.9.2), not a version bump to the base spec.
+#
+# Status: RECONCILED against the implementation, Session 9. This file is the
+# normative spelling of the enhanced wire format; src/api/wire/response_json.py
+# is expected to match it, not the other way round.
+#
+# TWO AUDIENCES, ONE FILE
+#
+# For an implementer, this pins the JSON spelling of the field list §3.9.2 and
+# §12.2 settle. For NENA, it is the interface-extension proposal expressed as a
+# literal additive diff. The two readings do not conflict: every field here
+# exists because the strict i3 interface discards something the engine computed,
+# and each is annotated with what is lost and where §16 records it.
+#
+# WHY THE RESPONSE CONTENT TYPE DIFFERS FROM THE NORMATIVE YAML
+#
+# The normative YAML declares `application/xml` for the 200 response while
+# typing the body as an object with a string property. Those two cannot both
+# hold, and the strict resources carry that defect faithfully rather than
+# silently repairing it (§3.9.1, §1.2.1, recorded as a §16 row). These
+# resources are new, so no conformance obligation forces them to inherit it:
+# they declare `application/json`, which is what a JSON object with a string
+# property actually is. The contrast is deliberate and is part of what the
+# NENA-facing diff demonstrates.
+#
+# The REQUEST body is left byte-identical to the normative declaration. §3.9.2
+# specifies the enhanced resources accept the same request as their strict
+# siblings, and altering the request shape would break that claim.
+
+paths:
+  /GeocodeEnhanced:
+    post:
+      tags:
+        - GeocodeEnhancedRequest
+      summary: >
+        Non-i3 extension. Converts a civic address to a ranked, scored list of
+        candidate geodetic representations of the location. Same request as
+        /Geocode; the response is the full candidate list the engine produced,
+        of which /Geocode discloses only rank 1 (§2.3, decision 8).
+      operationId: GeocodeEnhancedRequest
+      requestBody:
+        description: PIDF-LO data
+        content:
+          application/json:
+            schema:
+              type: string
+        required: true
+      responses:
+        '200':
+          description: Data successfully converted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeocodeCandidateList'
+        '307':
+          description: Temporary Redirect
+          headers:
+            Location:
+              description: Referral URI of another GCS
+              schema:
+                type: string
+                format: uri
+        '454':
+          description: Unspecified Error
+        '468':
+          description: No Address Found
+
+  /ReverseGeocodeEnhanced:
+    post:
+      tags:
+        - ReverseGeocodeEnhancedRequest
+      summary: >
+        Non-i3 extension. Converts a geodetic representation of a location to
+        a ranked, scored list of candidate civic addresses. Same request as
+        /ReverseGeocode; the response is the full candidate list ordered per
+        §10.3 (containment, then tier, then distance).
+      operationId: ReverseGeocodeEnhancedRequest
+      requestBody:
+        description: PIDF-LO data
+        content:
+          application/json:
+            schema:
+              type: string
+        required: true
+      responses:
+        '200':
+          description: Data successfully converted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReverseGeocodeCandidateList'
+        '307':
+          description: Temporary Redirect
+          headers:
+            Location:
+              description: Referral URI of another GCS
+              schema:
+                type: string
+                format: uri
+        '454':
+          description: >
+            Unspecified Error. Declared on BOTH enhanced resources. The
+            normative YAML omits 454 from /ReverseGeocode while declaring it
+            on /Geocode; §12.3 declines to follow that asymmetry and records
+            it in §16.
+        '468':
+          description: No candidate within the configured reverse search radius
+
+# NOTE ON 469 — the normative YAML declares 469 (Unknown MCS/GCS) on both
+# strict resources. It is NOT declared here, on either resource. This service
+# never emits 469: the condition is undefined for a request carrying no MCS or
+# GCS identity (§2.1), and src/api/status.py mints none. Declaring a status the
+# implementation cannot produce would misdescribe the interface.
+
+components:
+  schemas:
+
+    # ----------------------------------------------------------------------
+    # Vocabularies
+    # ----------------------------------------------------------------------
+
+    LocationType:
+      type: string
+      description: >
+        Ordered precision tier of the matched geometry class (§7.4, §3.3).
+        Keyed to the class of geometry matched, never to a ladder rung, so it
+        means the same thing in both directions. Independent of the i3 §10.31
+        Match Type registry, which cannot express this distinction (§12.2).
+        Listed most precise first.
+      enum:
+        - SPACE_3D
+        - FOOTPRINT_2D
+        - ADDRESS_POINT
+        - INTERPOLATED_POINT
+        - STREET_SEGMENT
+
+    MatchTypeToken:
+      type: string
+      description: >
+        i3 §10.31 Match Type registry token. This implementation emits only
+        Address (any point-tier match) and RoadCenterline (any road-tier
+        match). Hybrid does not apply because one candidate matches exactly
+        one feature; CoverageRegion is LoST-specific and out of scope (§3.1);
+        PoliticalBoundary, MsagCommunity, and Other do not arise from a GCS
+        match. The registry is materially coarser than locationType —
+        RoadCenterline covers both a street-level match and a house number
+        interpolated from a range without distinguishing them, and no token
+        exists for an interior or volumetric match at all. Both fields
+        therefore travel (§12.2, §16).
+      enum:
+        - Address
+        - RoadCenterline
+
+    # ----------------------------------------------------------------------
+    # Shared quality block (§7.4)
+    # ----------------------------------------------------------------------
+
+    CandidateQuality:
+      type: object
+      description: >
+        The three-field quality model of §7.4, carried by every ranked
+        candidate in either direction, plus the registry token. Candidates
+        appear in rank order; there is no explicit rank field, because JSON
+        array order is significant and the service does not re-sort a list
+        after assembling it.
+      required:
+        - matchScore
+        - locationType
+        - confidence
+        - matchType
+      properties:
+        matchScore:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          description: >
+            §6.5 per-field similarity score (Geocode) or §10.6 spatial-fit
+            score (ReverseGeocode). Answers "did we find or place the right
+            record" and says nothing about positional precision — see
+            locationType, which is orthogonal to it. Rounded to 3 decimals.
+        locationType:
+          $ref: '#/components/schemas/LocationType'
+        confidence:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          description: >
+            matchScore scaled to the locationType tier's ceiling (decision 31).
+            Derived from the other two fields and never stored independently.
+
+            BOUNDS DIFFER DELIBERATELY FROM THE XML PATH. RFC 7459's confidence
+            element constrains its decimal form minExclusive 0.0 / maxExclusive
+            100.0, so neither bound is expressible there and the strict
+            interface emits the token "unknown" instead (spec Appendix C.4 Q5).
+            That constraint belongs to RFC 7459's XML schema, not to this JSON
+            extension, which is therefore able to state a confidence of exactly
+            0 or exactly 100 as a number. Q5 remains live for the strict path
+            and does not arise here.
+
+            Confidence does NOT degrade when §6.3 merges candidates: it is a
+            match-quality dial, and the merged extent is carried by the Circle
+            geometry inside pidfLo and by horizontalUncertaintyMeters
+            (decision 88).
+        matchType:
+          $ref: '#/components/schemas/MatchTypeToken'
+        matchScoreBreakdown:
+          type: object
+          description: >
+            Optional per-field (Geocode, §6.5) or per-component
+            (ReverseGeocode, §10.6) breakdown underlying matchScore. Absent
+            where the engine produced no breakdown; never partially populated.
+            A field gated rather than scored still appears here at its fixed
+            value, so a consumer can see it was accounted for (decision 69).
+          additionalProperties:
+            type: number
+            format: double
+
+    # ----------------------------------------------------------------------
+    # Geocode (forward)
+    # ----------------------------------------------------------------------
+
+    GeocodeCandidate:
+      allOf:
+        - $ref: '#/components/schemas/CandidateQuality'
+        - type: object
+          required:
+            - pidfLo
+          properties:
+            pidfLo:
+              type: string
+              description: >
+                The full matched PIDF-LO record — civic AND geodetic together,
+                not a bare geometry (§8.2, decision 11) — so a caller that
+                queried "101 Main St" and matched "101 Mayne St" can see the
+                substitution by diffing the record against its query. The name
+                carries no Geo/Address suffix precisely because it is both.
+            horizontalUncertaintyMeters:
+              type: number
+              format: double
+              minimum: 0
+              description: >
+                Radius of the §6.3 merge extent, where candidates were merged.
+                ABSENT for an unmerged answer, and absence means "no synthesised
+                uncertainty" rather than "unknown": §7.4 declines to invent an
+                uncertainty around a single matched geometry, because the
+                geometry is itself the uncertainty statement.
+            verticalExtentMeters:
+              type: number
+              format: double
+              minimum: 0
+              description: >
+                Vertical extent of the merge, where a merge spanned a vertical
+                range. Absent on the same terms as horizontalUncertaintyMeters.
+            mergedFrom:
+              type: integer
+              minimum: 2
+              description: >
+                Count of candidates averaged into this answer under §6.3.
+                ABSENT where the answer is a single unmerged match — absence
+                means exactly 1, not unknown. Present only when 2 or more.
+
+    GeocodeCandidateList:
+      allOf:
+        - $ref: '#/components/schemas/EnhancedEnvelope'
+        - type: object
+          required:
+            - candidates
+          properties:
+            candidates:
+              type: array
+              description: Ranked candidates, most preferred first (§6.5 ordering).
+              items:
+                $ref: '#/components/schemas/GeocodeCandidate'
+
+    # ----------------------------------------------------------------------
+    # ReverseGeocode
+    # ----------------------------------------------------------------------
+
+    ReverseGeocodeCandidate:
+      allOf:
+        - $ref: '#/components/schemas/CandidateQuality'
+        - type: object
+          required:
+            - pidfLo
+            - distanceMeters
+            - contained
+            - houseNumberSynthesised
+          properties:
+            pidfLo:
+              type: string
+              description: >
+                The full matched PIDF-LO civic record (§12.2). Named as on the
+                forward resource for symmetry.
+            distanceMeters:
+              type: number
+              format: double
+              minimum: 0
+              description: >
+                Raw geodesic distance in metres, search origin to matched
+                feature (§10.2, §10.5). Neither damped nor scaled — the
+                spatial-fit score that informs rank order lives in matchScore.
+                This disclosure is what pays for §10.5's uncorrected centerline
+                bias: a caller who can see the distance can see how close the
+                call was.
+            contained:
+              type: boolean
+              description: >
+                Whether the search origin fell within the matched feature
+                (§10.3). Containment precedes tier and distance in the ordering.
+            houseNumberSynthesised:
+              type: boolean
+              description: >
+                Whether the house number in pidfLo was interpolated rather than
+                read from a matched record. ALWAYS PRESENT, because the thing it
+                reports cannot be inferred from anything else on the wire:
+                RFC 5139 gives HNO no way to mark itself approximate even in
+                principle, so the strict interface returns a synthesised number
+                indistinguishable from an asserted one (§11.2, §16).
+            placementMethod:
+              type: string
+              description: >
+                STA-006.3 §6.1 Placement Method ID of the matched record, passed
+                through as the SI spelled it and not normalised here (spec
+                Appendix C.4 Q19). Omitted, not null, where the record carries
+                none. Reverse-only: the forward resource does not carry this
+                field (§3.9.2).
+
+    ReverseGeocodeCandidateList:
+      allOf:
+        - $ref: '#/components/schemas/EnhancedEnvelope'
+        - type: object
+          required:
+            - candidates
+          properties:
+            candidates:
+              type: array
+              description: >
+                Ranked candidates, most preferred first (§10.3 ordering:
+                containment, then tier, then distance).
+              items:
+                $ref: '#/components/schemas/ReverseGeocodeCandidate'
+
+    # ----------------------------------------------------------------------
+    # Shared envelope
+    # ----------------------------------------------------------------------
+
+    EnhancedEnvelope:
+      type: object
+      description: >
+        Fields carried alongside the candidate list on both enhanced
+        resources. Both are conditional, and in both cases absence carries
+        meaning rather than signalling ignorance.
+      properties:
+        locationCount:
+          type: integer
+          minimum: 2
+          description: >
+            Number of locations the request carried, where it carried more than
+            one. ABSENT for a single-location request; absence means exactly 1.
+            i3 §4.5 mandates converting the first location and provides no way
+            to signal that the others were discarded, so this is the only
+            interface in the service where that discard is visible at all
+            (§4.2, decision 50, §16).
+        droppedElements:
+          type: array
+          description: >
+            Elements the request carried that admission could not use. Absent
+            where nothing was dropped. Lets a caller handed a street-level
+            answer see that the house number was the reason, rather than
+            inferring it from a lower score (decision 63).
+          items:
+            type: object
+            required:
+              - element
+              - value
+              - reason
+            properties:
+              element:
+                type: string
+                description: The civic element name as the request spelled it.
+              value:
+                type: string
+                description: The value as received, before rejection.
+              reason:
+                type: string
+                description: Why admission could not use it.
+
+    # ----------------------------------------------------------------------
+    # Discovery
+    # ----------------------------------------------------------------------
+
+    VendorCapability:
+      type: object
+      description: >
+        Proposed shape for the /Versions "vendor" string this implementation
+        emits, so a client can discover the enhanced resources without a
+        separate specification. i3 leaves "vendor" undefined (§A.1); this is a
+        proposed convention, not a claim that i3 requires this shape.
+      properties:
+        vendor:
+          type: string
+          enum:
+            - gcs-enhanced-v1
+          description: >
+            Presence of this token in a Versions entry's "vendor" field
+            indicates /GeocodeEnhanced and /ReverseGeocodeEnhanced are
+            available alongside the strict resources.
