@@ -20,12 +20,13 @@ env/
 *.p12
 *.pfx
 
-# --- GIS data (statewide address data — not for version control) ---
+# --- GIS data (address data — not for version control) ---
 data/*.gpkg
 data/*.cache.json
 data.gpkg
 *.gpkg-shm
 *.gpkg-wal
+!data/.gitkeep
 
 # --- Tuning / regression baselines (may contain real address data) ---
 data/sample_pairs.json
