@@ -5,9 +5,13 @@
 # GeodeticData, and CivicAddress are untouched. Discovery is via the
 # /Versions "vendor" parameter (§3.9.2), not a version bump to the base spec.
 #
-# Status: RECONCILED against the implementation, Session 9. This file is the
-# normative spelling of the enhanced wire format; src/api/wire/response_json.py
-# is expected to match it, not the other way round.
+# Status: RECONCILED against the implementation, Session 9 (decision 92);
+# updated Session 15 (decision 117) to correct the response-content-type
+# reasoning below in light of decision 116 and to add the 454/468 body schema
+# this file had never declared, though both codes have carried a body since
+# decisions 36 and 114 respectively. This file is the normative spelling of
+# the enhanced wire format; src/api/wire/response_json.py and src/api/status.py
+# are expected to match it, not the other way round.
 #
 # TWO AUDIENCES, ONE FILE
 #
@@ -19,14 +23,26 @@
 #
 # WHY THE RESPONSE CONTENT TYPE DIFFERS FROM THE NORMATIVE YAML
 #
-# The normative YAML declares `application/xml` for the 200 response while
-# typing the body as an object with a string property. Those two cannot both
-# hold, and the strict resources carry that defect faithfully rather than
-# silently repairing it (§3.9.1, §1.2.1, recorded as a §16 row). These
-# resources are new, so no conformance obligation forces them to inherit it:
-# they declare `application/json`, which is what a JSON object with a string
-# property actually is. The contrast is deliberate and is part of what the
-# NENA-facing diff demonstrates.
+# UPDATED (decision 117 — see decision 116 first): decision 116 found that the
+# normative YAML's `application/xml` content type and its `{pidfLoGeo: string}`
+# schema are NOT irreconcilable. Absent an `xml:` annotation, OpenAPI 3.0's own
+# default XML serialization turns a schema's properties into child elements
+# named after the property, which is exactly what `src/api/wire/strict_xml.py`
+# now emits: `<GeodeticData><pidfLoGeo><![CDATA[...]]></pidfLoGeo></GeodeticData>`.
+# The strict resources therefore do NOT carry a defect on this axis — the
+# earlier framing here (this file, prior to decision 117) claimed they did,
+# and was written before decision 116 corrected that reading. §3.9.1's own
+# §16 row and correction note carry the full history.
+#
+# That leaves this file's `application/json` choice on its own two feet rather
+# than resting on the strict interface's (non-)defect: these resources declare
+# `application/json` because their schema is GCS's own additive definition
+# (§2.2), never bound to the normative YAML's content type either way, and
+# JSON is the natural fit for a schema this shape — a list of scored
+# candidates — regardless of what the strict interface does. The contrast with
+# the strict interface's CDATA-wrapped XML is still real and still part of
+# what the NENA-facing diff demonstrates; it is just no longer a contrast
+# between "reconcilable" and "irreconcilable."
 #
 # The REQUEST body is left byte-identical to the normative declaration. §3.9.2
 # specifies the enhanced resources accept the same request as their strict
@@ -67,8 +83,16 @@ paths:
                 format: uri
         '454':
           description: Unspecified Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorReason'
         '468':
           description: No Address Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorReason'
 
   /ReverseGeocodeEnhanced:
     post:
@@ -108,8 +132,16 @@ paths:
             normative YAML omits 454 from /ReverseGeocode while declaring it
             on /Geocode; §12.3 declines to follow that asymmetry and records
             it in §16.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorReason'
         '468':
           description: No candidate within the configured reverse search radius
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorReason'
 
 # NOTE ON 469 — the normative YAML declares 469 (Unknown MCS/GCS) on both
 # strict resources. It is NOT declared here, on either resource. This service
@@ -391,6 +423,27 @@ components:
               reason:
                 type: string
                 description: Why admission could not use it.
+
+    # ----------------------------------------------------------------------
+    # Errors (decision 117 — added; the schema for '454' and '468' below was
+    # missing entirely, though both codes have always carried a body)
+    # ----------------------------------------------------------------------
+
+    ErrorReason:
+      type: object
+      description: >
+        The body every non-200 response on this interface carries
+        (`src/api/status.py`). On 454, `reason` is call-site-specific
+        diagnostic text (decision 36). On 468, `reason` is a single fixed
+        string — "No result was derivable for the query." — identical
+        regardless of which path to zero candidates produced it; decision
+        114 explains why the two codes differ on this point despite sharing
+        one schema shape.
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
 
     # ----------------------------------------------------------------------
     # Discovery

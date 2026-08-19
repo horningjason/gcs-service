@@ -27,6 +27,11 @@ sipmessage==0.7.1
 # Testing
 pytest==9.0.3
 httpx==0.28.1
+# tests/security/conftest.py builds a throwaway PKI with `cryptography` for
+# the live TLS/mTLS handshake suite. Not pinned directly here — it arrives
+# transitively via i3-fe-core, which already depends on it for
+# i3_fe_core.security.tls / .peer_auth. Pin directly if that transitive
+# path ever changes.
 
 # NOT carried over from LVF:
 #   dnspython — U-NAPTR resolution existed for LVF_PARENT_URI. The GCS has no

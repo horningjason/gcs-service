@@ -1,30 +1,14 @@
-"""§3.9.1 / §3.9.2 — the JSON wrappers and the enhanced candidate schema.
+"""§3.9.2 — the enhanced candidate schema.
 
-A JSON OBJECT CARRYING AN XML DOCUMENT AS A STRING
-
-The normative YAML declares the response Content-Type `application/xml` while
-declaring the response schema as an object with a string property. Those two
-cannot both hold. This implementation emits `application/json` for the wrapper
-and carries the PIDF-LO XML document as the string value, which is the only
-reading under which the declared schemas are implementable, and records the
-defect as a §16 row (§3.9.1). The property names are the YAML's, not the §4.5
-text's: `pidfLoGeo` and `pidfLoAddress` — the published text's `PIDFLOAddress`
-is not the schema's casing, and `GeodecticData` is a typo for `GeodeticData`.
-
-THE STRICT WRAPPERS CARRY ONE FIELD, AND THAT IS THE POINT
-
-`GeodeticData` has exactly `pidfLoGeo`; `CivicAddress` has exactly
-`pidfLoAddress`. No score, no rank, no match type, no Placement Method, no
-containment flag, no indication that a match was fuzzy or a house number
-interpolated. Everything the engine computed is discarded at this boundary
-(§8.1, §12.1). Adding a field would breach §1.2.1 — "the format permits it" is
-not "the standard asks for it" — and would also destroy the controlled
-comparison §2.2 exists to make. The deficiency is carried faithfully.
-
-Note also that neither wrapper carries `gcsReferralUri`. The §4.5 text says it
-MUST be present on failure; the YAML defines no such property on either object,
-and decision 34 follows the YAML and puts the referral in the Location header of
-a 307. There is no failure body here at all.
+The strict interface's 200 wrapper (`GeodeticData`/`CivicAddress`) used to be
+built here as a JSON object, on the reasoning that the normative YAML's
+declared `application/xml` content type couldn't hold its own declared
+object-with-a-string-property schema. That reasoning is superseded (decision
+116, Session 14): OpenAPI 3.0's own default XML serialization — an object's
+properties become child elements named after the property, with no `xml:`
+annotation required — makes `application/xml` and the declared schema hold
+together after all. `src/api/wire/strict_xml.py` builds that response now;
+this module is enhanced-only.
 
 THE ENHANCED SCHEMA IS RECONCILED AND NORMATIVE (decision 92)
 
@@ -32,7 +16,9 @@ THE ENHANCED SCHEMA IS RECONCILED AND NORMATIVE (decision 92)
 against this module in Session 9, and is the normative spelling of the
 enhanced wire format — this module is expected to match it, not the other
 way round. Decision 92 records the reconciliation and every naming
-divergence it resolved. Appendix C item (c) is closed.
+divergence it resolved. Appendix C item (c) is closed. The enhanced
+interface is GCS's own additive, non-normative schema (§2.2), so decision
+116 does not touch it: `candidates[]` stays JSON, unaffected.
 """
 
 from __future__ import annotations
@@ -41,20 +27,6 @@ from typing import Any, Iterable, Optional, Sequence
 
 from src.api.wire.civic_xml import DroppedElement
 from src.engine.models import LocationType
-
-# ---------------------------------------------------------------------------
-# The strict wrappers (§3.9.1)
-# ---------------------------------------------------------------------------
-
-def geodetic_data(pidf_lo: str) -> dict[str, str]:
-    """POST /Geocode's 200 body (§8.1)."""
-    return {"pidfLoGeo": pidf_lo}
-
-
-def civic_address(pidf_lo: str) -> dict[str, str]:
-    """POST /ReverseGeocode's 200 body (§12.1)."""
-    return {"pidfLoAddress": pidf_lo}
-
 
 # ---------------------------------------------------------------------------
 # The enhanced schema (§3.9.2, §8.2, §12.2)

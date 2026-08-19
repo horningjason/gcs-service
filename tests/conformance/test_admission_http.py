@@ -102,8 +102,9 @@ def test_json_string_body_is_accepted_over_http(client):
 def test_geocode_with_only_a_geodetic_location_is_468(client):
     resp = client.post(GEOCODE, content=presence(tuple_(GEO_CHUNK)))
     assert resp.status_code == 468
-    # §4.5 defines no body for 468 and none is invented (§1.2.1).
-    assert resp.content == b""
+    # Decision 114: a fixed, non-distinguishing reason travels on every 468,
+    # not the admission-specific text that actually triggered this one.
+    assert resp.json() == {"reason": "No result was derivable for the query."}
 
 
 def test_reversegeocode_with_only_a_civic_location_is_468(client):

@@ -2,10 +2,15 @@
 <!--
   POST this to /Gcs/v1/Geocode or /Gcs/v1/GeocodeEnhanced. The street name
   does not exist anywhere in the loaded GIS data, so no candidate clears
-  GCS_MIN_MATCH_SCORE and both endpoints return 468 with the reason
-  "No candidate was derivable for the query address." A clean example of
-  a genuine non-match, as opposed to the ambiguity 468 the strict endpoint
-  can also return (see geocode_civic_address.xml and README.md).
+  GCS_MIN_MATCH_SCORE and both endpoints return 468.
+
+  The body is {"reason": "No result was derivable for the query."} — the
+  fixed, invariant string decision 114 puts on every 468 regardless of which
+  §6.4 path produced it. This fixture is a genuine non-match; the strict
+  endpoint also returns 468 for §6.3 ambiguity, and the wire deliberately
+  does not let a caller tell the two apart. The diagnostic text ("No
+  candidate was derivable for the query address.") is logged server-side
+  only. See README.md for the curl command.
 -->
 <presence xmlns="urn:ietf:params:xml:ns:pidf"
           xmlns:dm="urn:ietf:params:xml:ns:pidf:data-model"

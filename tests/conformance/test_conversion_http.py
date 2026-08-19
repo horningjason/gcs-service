@@ -8,7 +8,6 @@ tuning), so these tests supply the trivial ones in scoring_stubs.py.
 
 from __future__ import annotations
 
-import json
 import os
 
 import pytest
@@ -117,9 +116,14 @@ def street_only_client(monkeypatch):
 
 
 def _pidf(resp, field: str) -> etree._Element:
-    body = resp.json()
-    assert field in body, body
-    return etree.fromstring(body[field].encode("utf-8"), XML_PARSER)
+    """Decision 116 — the strict 200 body is real XML, not JSON: a
+    <GeodeticData>/<CivicAddress> root carrying `field` as a CDATA child.
+    lxml decodes CDATA transparently, so `child.text` is already the raw
+    embedded PIDF-LO string."""
+    root = etree.fromstring(resp.content, XML_PARSER)
+    child = root.find(field)
+    assert child is not None, etree.tostring(root)
+    return etree.fromstring(child.text.encode("utf-8"), XML_PARSER)
 
 
 def _point_chunk(lat=LAT, lon=LON) -> str:
@@ -196,9 +200,11 @@ def test_the_strict_forward_response_carries_no_score_or_rank(client):
     """The other half of §8.1. Nothing in the body names a score, a rank, a
     match type or a Placement Method — there is no i3 field for any of them."""
     resp = client.post(GEOCODE, content=presence(tuple_(CIVIC_CHUNK)))
-    assert set(resp.json()) == {"pidfLoGeo"}
+    root = etree.fromstring(resp.content, XML_PARSER)
+    assert root.tag == "GeodeticData"
+    assert {c.tag for c in root} == {"pidfLoGeo"}
 
-    lowered = resp.json()["pidfLoGeo"].lower()
+    lowered = resp.text.lower()
     for forbidden in ("matchscore", "locationtype", "placement", "rank"):
         assert forbidden not in lowered
 
@@ -263,9 +269,11 @@ def test_the_strict_reverse_response_carries_the_address_and_nothing_else(client
     Method, and no indication that a house number was interpolated rather than
     read. Everything §10 and §11 computed is discarded at this boundary."""
     resp = client.post(REVERSE, content=presence(tuple_(_point_chunk())))
-    assert set(resp.json()) == {"pidfLoAddress"}
+    root = etree.fromstring(resp.content, XML_PARSER)
+    assert root.tag == "CivicAddress"
+    assert {c.tag for c in root} == {"pidfLoAddress"}
 
-    lowered = resp.json()["pidfLoAddress"].lower()
+    lowered = resp.text.lower()
     for forbidden in ("distance", "contained", "synthes", "matchscore"):
         assert forbidden not in lowered
 
@@ -499,7 +507,8 @@ def test_the_location_count_surfaces_only_on_the_enhanced_interface(client):
     assert enhanced.json()["locationCount"] == 2
 
     strict = client.post(GEOCODE, content=two)
-    assert set(strict.json()) == {"pidfLoGeo"}
+    root = etree.fromstring(strict.content, XML_PARSER)
+    assert {c.tag for c in root} == {"pidfLoGeo"}
 
 
 # ---------------------------------------------------------------------------
@@ -531,13 +540,22 @@ def test_a_missing_scorer_is_454_and_not_a_new_status_code(monkeypatch):
     assert "scoring function" in resp.json()["reason"]
 
 
-def test_the_response_body_is_json_carrying_xml_as_a_string(client):
-    """§3.9.1 — the YAML declares application/xml around a JSON-shaped object,
-    which is incoherent as written. This is the only reading under which its
-    declared schemas are implementable, and the defect is a §16 row."""
+def test_the_response_body_is_real_xml_carrying_the_pidf_lo_as_cdata(client):
+    """§3.9.1, decision 116 — the YAML's declared application/xml content
+    type and its `pidfLoGeo: string` schema both hold under OpenAPI's
+    default XML serialization (an object's properties become child elements
+    named after the property; no `xml:` annotation required), superseding
+    the Session 3 JSON-wrapper reading this test used to assert. The
+    embedded PIDF-LO travels as a CDATA section, not a JSON-escaped string."""
     resp = client.post(GEOCODE, content=presence(tuple_(CIVIC_CHUNK)))
 
-    assert resp.headers["content-type"].startswith("application/json")
-    payload = json.loads(resp.text)
-    assert isinstance(payload["pidfLoGeo"], str)
-    assert payload["pidfLoGeo"].lstrip().startswith("<?xml")
+    assert resp.headers["content-type"].startswith("application/xml")
+    root = etree.fromstring(resp.content, XML_PARSER)
+    assert root.tag == "GeodeticData"
+    child = root.find("pidfLoGeo")
+    assert child is not None
+    assert child.text.lstrip().startswith("<?xml")
+    # lxml round-trips CDATA content as plain .text — confirm it was actually
+    # serialised as CDATA on the wire, not entity-escaped, since that's the
+    # whole point of decision 116 (real embedded newlines, not \n escapes).
+    assert b"<![CDATA[" in resp.content

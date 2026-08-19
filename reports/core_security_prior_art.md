@@ -1,11 +1,18 @@
 # Prior Art: TLS / mTLS / Peer Authentication in the i3-fe-core Sibling Family
 
+> **POINT-IN-TIME SNAPSHOT.** Written before decision 107. Its findings about
+> the *siblings* still stand and are the reasoning decision 107 rests on, but
+> its statements about what the GCS wires are historical: the GCS now builds
+> every SSL context through `i3_fe_core.security.tls`. Two details have also
+> gone stale — `gcs-service` is now a git repository, and the LVF episode
+> described below is guarded against here by `tests/security/`.
+
 Audit-only. No file in this repo or in `../mcs-service`, `../lvf-service`, or
 `../i3-fe-core` was modified. Both sibling repos were located one directory
 up from `gcs-service`: `D:\geosos\software\projects\mcs-service` and
 `D:\geosos\software\projects\lvf-service`. Both are git repositories with
-usable history; `gcs-service` itself is not a git repo, so no equivalent
-archaeology is possible for the GCS's own TLS code.
+usable history; `gcs-service` was not a git repo when this was written, so no
+equivalent archaeology was possible for the GCS's own TLS code.
 
 ## Bottom line
 

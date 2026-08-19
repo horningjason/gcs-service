@@ -115,7 +115,21 @@ def build_presence(
 
 
 def to_string(presence: etree._Element) -> str:
-    """Serialise with an XML declaration — this is a whole document."""
+    """Serialise with an XML declaration — this is a whole document.
+
+    `etree.indent()` runs first because `pretty_print=True` alone only fills
+    in indentation where an element's `.tail`/`.text` is still `None`; it
+    leaves anything already set untouched. `usage_rules`, when the input
+    carried one, is a `copy.deepcopy()` of an element parsed out of the
+    CALLER's request (build_presence(), above) — it still carries the
+    whitespace `.tail` from its position in that original document, which is
+    meaningless once relocated here but is enough to make `pretty_print`
+    silently skip reformatting the `<gp:geopriv>` subtree around it.
+    `etree.indent()` recomputes every structural whitespace node from
+    scratch regardless of what was already there, so this holds regardless
+    of which payload elements were freshly built and which were copied in.
+    """
+    etree.indent(presence, space="  ")
     return etree.tostring(
         presence,
         pretty_print=True,

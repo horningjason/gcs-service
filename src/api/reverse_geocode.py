@@ -4,7 +4,10 @@ Contract, per references/i3-geocode-conversion.yaml (normative over the §4.5
 text per i3 §2.8):
 
     request   PIDF-LO carrying a geodetic representation, as a string
-    200       CivicAddress { pidfLoAddress: string }
+    200       CivicAddress { pidfLoAddress: string }, as real XML — see
+              src/api/geocode.py's docstring for decision 116, applied
+              identically here: <CivicAddress><pidfLoAddress><![CDATA[...]]>
+              </pidfLoAddress></CivicAddress>
     307       referral, URI in the Location header
     454       schema validation failure / residual internal error
     468       valid request, no candidate within GCS_REVERSE_SEARCH_RADIUS_M
@@ -53,9 +56,9 @@ from src.api.status import (
     error_response,
     failure_response,
     no_result_response,
-    success_response,
+    success_xml_response,
 )
-from src.api.wire import response_json
+from src.api.wire import strict_xml
 from src.api.wire.gml_xml import GmlParseError
 from src.app import lifecycle
 from src.engine.scoring_registry import ScorerUnavailable
@@ -128,8 +131,8 @@ async def reverse_geocode(request: Request) -> Response:
 
     # Stage 3 — §12.1. Rank 1 of the same ordered list the enhanced resource
     # returns whole, which is what makes the two a controlled comparison (§2.2).
-    return _respond(success_response(
-        response_json.civic_address(
+    return _respond(success_xml_response(
+        strict_xml.civic_address_xml(
             conversion.reverse_document(converted.answers[0], admitted)
         )
     ))

@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   POST this to /Gcs/v1/Geocode (strict i3) or /Gcs/v1/GeocodeEnhanced
-  (i3-improved). 2801 Del Rio Drive is a real SiteStructureAddressPoint in
-  data/data.gpkg, so this exercises a rung-1 exact address-point match.
-  (2800 is NOT an address point on this street — that case lives in
-  geocode_interpolated_point.xml and exercises rung-2 interpolation.)
+  (i3-improved). 802 12th Avenue NW, Mandan is a real SiteStructureAddressPoint
+  in data/data.gpkg, so this exercises a rung-1 exact address-point match.
+  (For a rung-2 interpolation example — a house number that is deliberately
+  NOT an address point but falls inside a RoadCenterLine segment's range —
+  see geocode_interpolated_point.xml, which uses 2800 Del Rio Drive.)
 
   See README.md's "Try it" section for the curl command. Both endpoints
   return a clean ADDRESS_POINT match; the enhanced endpoint additionally

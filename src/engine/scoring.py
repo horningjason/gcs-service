@@ -402,9 +402,6 @@ _BASE_WEIGHTS: dict[str, float] = {
     "Country": 2.0,
 }
 
-#: Reverse (§10.6) component weights, before extent damping and the
-#: geocoded-placement penalty. distance_component and containment share the
-#: same 0-100 scale as the forward matchScore.
 #: Default for GCS_GEOCODED_PLACEMENT_PENALTY, which src/app/lifecycle.py binds
 #: at scorer registration. Kept here so make_reverse_scorer() is usable without
 #: the environment (tests, tools).
@@ -1023,7 +1020,18 @@ def _weighted_average(
         # supplies nothing this scorer recognises is a real edge case worth
         # surfacing rather than silently reporting a perfect or zero score.
         return 0.0, breakdown
-    return 100.0 * weighted_sum / weight_total, breakdown
+    # Clamped, not just computed: 100.0 * weighted_sum / weight_total is
+    # mathematically <= 100.0 whenever every similarity is, but float
+    # summation across several weighted terms is not associative, so an
+    # all-1.0 match can land a few ulps past 100.0 (found by the regression
+    # suite's real-data rung-2 interpolation case, tests/regression/). That
+    # overshoot would otherwise trip MatchQuality's strict range check
+    # (models.py __post_init__) and crash the request with an uncaught
+    # ValueError — a bare 500 outside §2.1's closed status set, on a request
+    # that should cleanly answer 200. The similarity inputs are themselves
+    # already clamped to [0, 1] upstream, so clamping only the float-noise
+    # margin here changes no scoring decision.
+    return min(100.0, max(0.0, 100.0 * weighted_sum / weight_total)), breakdown
 
 
 def score_ssap(query: CivicAddress, record: SSAPRecord) -> tuple[float, Mapping[str, float]]:

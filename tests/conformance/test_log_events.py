@@ -174,19 +174,24 @@ def test_malformed_request_still_emits_a_query_event(client, caplog):
     assert resp_evt["responseAdapter"]  # 454 carries a {"reason": ...} body
 
 
-def test_no_result_response_carries_468_and_no_body(client, caplog):
-    """468 carries no body (src/api/status.py: "§4.5 defines no body for 468
-    and none is invented") — responseAdapter must reflect that as absent, not
-    an empty string standing in for it."""
+def test_no_result_response_carries_468_and_a_fixed_generic_reason(client, caplog):
+    """468 carries a body as of decision 114 — a fixed, non-distinguishing
+    reason string identical on every 468 (src/api/status.py's
+    no_result_response()), not the admission-error-specific text that
+    triggered this particular one. responseAdapter should reflect that body,
+    not be absent the way it was before decision 114."""
     with caplog.at_level(logging.INFO, logger="i3_fe_core.logging.logging_client"):
         # Wrong profile for /Geocode — admitted, but nothing to convert (§4.2).
         resp = client.post(GEOCODE, content=presence(tuple_(GEO_CHUNK)))
     assert resp.status_code == 468
+    assert resp.json() == {"reason": "No result was derivable for the query."}
 
     events = _log_events(caplog)
     resp_evt = events[-1]
     assert resp_evt["responseStatus"] == 468
-    assert "responseAdapter" not in resp_evt  # prologue_to_dict drops None fields
+    assert json.loads(resp_evt["responseAdapter"]) == {
+        "reason": "No result was derivable for the query."
+    }
 
 
 # ---------------------------------------------------------------------------

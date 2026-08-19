@@ -4,7 +4,11 @@ Contract, per references/i3-geocode-conversion.yaml (normative over the §4.5
 text per i3 §2.8):
 
     request   PIDF-LO carrying a civic address, as a string
-    200       GeodeticData { pidfLoGeo: string }
+    200       GeodeticData { pidfLoGeo: string }, as real XML — the YAML's
+              declared application/xml content type and its string-typed
+              property both hold under OpenAPI's default XML serialization
+              (decision 116): <GeodeticData><pidfLoGeo><![CDATA[...]]>
+              </pidfLoGeo></GeodeticData>
     307       referral, URI in the Location header (no body field exists)
     454       schema validation failure / residual internal error
     468       valid request, no result derivable
@@ -43,9 +47,9 @@ from src.api.status import (
     error_response,
     failure_response,
     no_result_response,
-    success_response,
+    success_xml_response,
 )
-from src.api.wire import response_json
+from src.api.wire import strict_xml
 from src.app import lifecycle
 from src.engine.scoring_registry import ScorerUnavailable
 from src.logging.log_events import generate_query_id
@@ -116,6 +120,6 @@ async def geocode(request: Request) -> Response:
 
     # Stage 3 — §8.1. Everything the engine computed except the geodetic
     # representation is dropped right here.
-    return _respond(success_response(
-        response_json.geodetic_data(conversion.forward_document(answer, admitted))
+    return _respond(success_xml_response(
+        strict_xml.geodetic_data_xml(conversion.forward_document(answer, admitted))
     ))

@@ -37,12 +37,30 @@ derivation a field-for-field copy rather than a second mapping table, and keeps
                       renders the shape). Coordinate order is lat lon. Carries
                       the RFC 7459 confidence element.
 
-    response_json.py  GeodeticData / CivicAddress wrappers and the enhanced
-                      candidate schema.
+    strict_xml.py     the STRICT interface's 200 body: the normative YAML's
+                      GeodeticData / CivicAddress wrapper, emitted as real
+                      XML with the PIDF-LO in a CDATA section (decision 116).
 
-Note that the wrapper objects are JSON while their payload is an XML document
-carried as a string value — the only implementable reading of the normative
-YAML's declared schemas (§3.9.1, §16).
+    response_json.py  the ENHANCED interface's candidate schema — the quality
+                      fields, the two per-direction candidate shapes, and the
+                      envelope carrying locationCount / droppedElements.
+
+THE TWO INTERFACES DO NOT SHARE AN ENVELOPE FORMAT (decision 116)
+
+The strict 200 is `application/xml`. The normative YAML declares that content
+type alongside a `{pidfLoGeo|pidfLoAddress}: string` schema, and BOTH hold at
+once under OpenAPI 3.0's own default XML serialization — a schema's properties
+become child elements under a root named after the schema, and CDATA content
+is text, which is precisely what a JSON string value would have carried.
+strict_xml.py's docstring argues this in full, including why it supersedes the
+Session 3 reading that treated the two declarations as irreconcilable and
+emitted `application/json` from here instead.
+
+The enhanced 200 stays JSON: that schema is the GCS's own additive definition
+(`references/i3-geocode-conversion-enhanced.yaml`, §2.2), not bound to the
+normative YAML's declared content type. Non-200 responses are JSON on both
+interfaces — decision 116 is scoped to the 200 body the YAML declares a schema
+for, and 454/468 have none (see src/api/status.py).
 
 This package occupies the slot lvf-service/src/lost/wire/ does in that
 repository's layout. That is where the resemblance ends: decision 58 specifies

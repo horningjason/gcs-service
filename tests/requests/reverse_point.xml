@@ -2,10 +2,12 @@
 <!--
   POST this to /Gcs/v1/ReverseGeocode or /Gcs/v1/ReverseGeocodeEnhanced.
   The coordinate is the address point for 2708 Stevens Street, Bismarck, ND
-  (see geocode_civic_address.xml) — reversing it should hand that same
-  address back (spec §14.1's round-trip expectation). Note GML/RFC 5491
-  coordinate order is latitude then longitude. See README.md for the curl
-  command.
+  — reversing it should hand that same address back as an ADDRESS_POINT
+  match at confidence 80 (spec §14.1's round-trip expectation). This is a
+  different address than geocode_civic_address.xml's 802 12th Avenue NW,
+  Mandan; there is no forward fixture built around this one specifically.
+  Note GML/RFC 5491 coordinate order is latitude then longitude. See
+  README.md for the curl command.
 -->
 <presence xmlns="urn:ietf:params:xml:ns:pidf"
           xmlns:dm="urn:ietf:params:xml:ns:pidf:data-model"

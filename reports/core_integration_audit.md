@@ -1,5 +1,16 @@
 # i3-fe-core Integration Audit
 
+> **SUPERSEDED SNAPSHOT — read as history, not as current state.** This audit
+> was written before decision 107. Its central finding, that the GCS is
+> "materially under-integrated with core's security layer" and imports
+> `i3_fe_core.security.tls` / `.peer_auth` nowhere, is **no longer true**:
+> `main.py`, `gunicorn.conf.py`, `src/app/gunicorn_worker.py` and
+> `src/core_components.py` all build their SSL contexts through
+> `i3_fe_core.security.tls`, and `tests/security/` verifies the resulting
+> handshakes live. The capability table below is likewise a point-in-time
+> reading. Kept because the reasoning that identified the gap is still worth
+> reading; the root `CLAUDE.md` is authoritative for what is wired today.
+
 Audit-only. No source files were modified. Scope: what `../i3-fe-core`
 (sibling checkout, pinned at `v0.4.0` in `requirements.txt`) provides, what
 the GCS is obligated by NENA-STA-010.3f-2021 to use, what it actually wires

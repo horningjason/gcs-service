@@ -12,6 +12,17 @@ Required for the GCS.
                       Validation_L/R turned out not to exist (the columns are
                       Valid_L / Valid_R — spec Appendix C.4 R2).
 
+    field_stats.py    WRITTEN. Deployment-measured discriminative weight per
+                      civic element: how much a field can possibly tell us,
+                      measured from the provisioned data alone rather than
+                      tuned against match/non-match pairs. src/engine/
+                      scoring.py multiplies its base weights by these factors,
+                      so a field that is constant across the whole export
+                      stops carrying weight it cannot earn. _MIN_POPULATION is
+                      a first-principles sample-size floor (decision 68), not
+                      a tuned value. tools/field_stats_report.py prints the
+                      same measurement standalone.
+
     spatial_index.py  NOT YET WRITTEN. Degree-space bounding-box pre-filter
                       ahead of exact geodesic distance computation. Spec §10.2
                       sanctions this explicitly as an implementation

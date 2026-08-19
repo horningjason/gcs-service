@@ -6,7 +6,7 @@ Where each vendored source came from, so a future session can re-verify it.
 |---|---|---|
 | `GCS_Algorithm_Specification.md` | Authored in-repo (Jason Horning, ENP); markdown-native as of this date, converted from the prior docx-based version history (which Appendix D retains for continuity) | 2026-07-31 |
 | `i3-geocode-conversion.yaml` | `https://raw.githubusercontent.com/NENA911/Geocode-Conversion-Service/main/i3-geocode-conversion.yaml` | 2026-07-30 |
-| `i3-geocode-conversion-enhanced.yaml` | Authored in-repo; an additive diff against the vendored `i3-geocode-conversion.yaml` adding `/GeocodeEnhanced` and `/ReverseGeocodeEnhanced`. Modifies no line of the normative file. DRAFT — not yet logged to spec Appendix B nor cited from §3.9.2/§12.2 | 2026-08-02 |
+| `i3-geocode-conversion-enhanced.yaml` | Authored in-repo; an additive diff against the vendored `i3-geocode-conversion.yaml` adding `/GeocodeEnhanced` and `/ReverseGeocodeEnhanced`. Modifies no line of the normative file. NORMATIVE spelling of the enhanced wire format as of decision 92 (Session 9), cited from §3.9.2/§12.2; corrected for decision 116's content-type finding and given a declared 454/468 body schema by decision 117 (Session 15) | 2026-08-02, updated 2026-08-18 |
 | `rfc3863.txt` | `https://www.rfc-editor.org/rfc/rfc3863.txt` | 2026-07-30 |
 | `rfc4119.txt` | `https://www.rfc-editor.org/rfc/rfc4119.txt` | 2026-07-30 |
 | `rfc4745.txt` | `https://www.rfc-editor.org/rfc/rfc4745.txt` | 2026-07-30 |
