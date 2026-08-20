@@ -123,9 +123,36 @@
     
     <element name="posList" type="gml:DirectPositionListType"/>
     <complexType name="DirectPositionListType">
+        <!--
+          GCS deliberate extension beyond stock OGC GML 3.1.1 (this file's own
+          version="3.1.1" above is otherwise an unmodified copy). Stock 3.1.1
+          declares srsDimension once, on AbstractGeometryType via
+          SRSReferenceGroup (see above): it belongs to the GEOMETRY ELEMENT
+          (gml:Polygon, gml:LineString, and so on), not to the coordinate
+          list, and this type originally carried only `count`.
+
+          GML 3.2 / ISO 19136 moved srsDimension onto DirectPositionListType
+          itself, and that is where real world posList producers commonly put
+          it in practice: a posList element carrying its own srsDimension
+          attribute, dimensionality declared on the coordinate list rather
+          than (or in addition to) the geometry wrapping it.
+          src/api/wire/gml_xml.py's _ring_vertices already reads srsDimension
+          directly off the posList element on this convention (falling back
+          to 2 where absent), and has since before this schema change: the
+          parser was already correct for the input it needs to accept, and
+          this schema was the piece not admitting it. Adding the attribute
+          here accepts the UNION of both spellings (dimension on the geometry
+          element per 3.1.1, or on posList itself per 3.2 and common
+          practice) rather than picking one and rejecting the other, and
+          rather than silently backdating this file to 3.2 wholesale.
+          AbstractGeometryType / SRSReferenceGroup above are untouched: the
+          3.1.1 spelling still validates exactly as it always did.
+        -->
         <simpleContent>
             <extension base="gml:doubleList">
                 <attribute name="count" type="positiveInteger"
+                    use="optional"/>
+                <attribute name="srsDimension" type="positiveInteger"
                     use="optional"/>
             </extension>
         </simpleContent>

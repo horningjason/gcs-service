@@ -129,33 +129,144 @@ first version's *assumption* about what real data would do was wrong, and
 the seeded golden file said so. Recorded here so the next person adding a
 fixture doesn't repeat the exploration:
 
-- **A no-house-number query almost never degrades cleanly to a rung-3
-  street-level LineString on real data**, even though that is exactly what
-  the synthetic unit test in `tests/conformance/test_conversion_http.py`
-  demonstrates. §6.2 has no progressive filter: dropping the house number
-  doesn't narrow the candidate set, so on any real street that has address
-  points provisioned on it, *every one of them* still scores 100 (decision
-  66 — `Add_Number` isn't even a compared term once unpopulated) and rung-1
-  always outranks rung-3 (decision 70). A real street with more than a
-  couple of houses spans well past `GCS_AMBIGUITY_TOLERANCE_M`, so the
-  honest outcome is usually 468, not a clean line. `FWD-STREET-ONLY-001` and
-  `FWD-DROPPED-HNO-*-001` therefore deliberately use
-  `Fixtures.rcl_only_street()` — a real RoadCenterLine street with *zero*
-  SiteStructureAddressPoints anywhere on it — which is the only condition
-  that reliably produces the clean single-LineString answer on real data.
+- **A no-house-number query almost never degraded cleanly to a rung-3
+  street-level LineString on real data — and that turned out to be a bug in
+  the service, not a fact about the data.** This bullet is kept in its
+  original shape because the observation was correct and the conclusion
+  drawn from it was wrong, which is worth seeing.
+
+  What was observed: §6.2 has no progressive filter, so dropping the house
+  number doesn't narrow the candidate set; on any real street with address
+  points provisioned on it, every one of them still scored (`Add_Number`
+  isn't a compared term once unpopulated) and rung 1 always outranked rung 3
+  (decision 70). A real street with more than a couple of houses spans well
+  past `GCS_AMBIGUITY_TOLERANCE_M`, so the honest outcome was usually 468,
+  not a clean line. All of that was accurately measured.
+
+  What was concluded: that a fixture wanting a clean rung-3 answer must find
+  a street with *zero* address points, since that is the only condition that
+  reliably produced one. `FWD-STREET-ONLY-001` and `FWD-DROPPED-HNO-*-001`
+  were both built on that conclusion, and `Fixtures.rcl_only_street()` exists
+  to satisfy it.
+
+  What was actually true: §5, decision 63 and §15.1 step 4 all said a query
+  with no usable house number is answered at rung 3, and the ladder did not
+  do it. Rung 1 was searched unconditionally, so address points answered
+  questions nobody had asked — asserting house numbers the caller never
+  supplied — and decision 70's short-circuit then ended the search before
+  the road layer was read. **Decision 119 makes rung 1 inapplicable to a
+  query with no usable `Add_Number`**, so a clean rung-3 answer is now the
+  ordinary outcome for such a query on any street, address points or not.
+  The 468s this bullet described as "the honest outcome" were the ladder
+  answering the wrong question and then correctly noticing the answers
+  disagreed.
+
+  `rcl_only_street()` stays, and its empirical validation (below) stays with
+  it — but for a narrower reason than the one that motivated it. It no
+  longer buys a rung-3 answer; decision 119 does that. What it still buys
+  `FWD-STREET-ONLY-001` is *one* segment back rather than many, which is a
+  property of the street's geometry and not of the ladder.
+
+  **`rcl_only_street()` itself needed a second correction, twice, before
+  that guarantee actually held.** First found: it excluded a street by
+  *exact-string* match against SSAP's `St_Name` column, but a handful of
+  real address points had a blank `A3` (city resolved only through the
+  community cascade's `Post_Comm` fallback, never through `A3` itself —
+  decision 66/76) and were silently absent from the column the exclusion
+  check read, so it picked "94" (Interstate 94, Bismarck) believing it was
+  address-point-free when two real SSAP records sat right on it. Fixed by
+  computing the exclusion set before that filter runs. Second, and more
+  fundamental: exact-string absence from SSAP is not sufficient at all,
+  because the real scorer compares street names by Soundex-or-edit-distance
+  (decision 71/72), not exact match. The fix above then picked "Airport
+  Frontage Road" — genuinely absent from SSAP by name — only for 138 real
+  "Airport Road" address points to flood in at `St_Name` similarity 71.88%,
+  comfortably above `_STREET_QUALIFY_MIN_EDIT_SIM` (0.5). `rcl_only_street()`
+  now validates every exact-name-clean candidate **empirically**, dispatching
+  a real no-house-number query through the actual engine
+  (`harness.initialize()` / `_dispatch_geocode_enhanced`) and requiring
+  exactly one `STREET_SEGMENT` candidate back, before accepting it — the
+  only check that cannot go stale the way reimplementing the similarity
+  threshold here would. `FWD-STREET-ONLY-001` currently pins "Cadillac
+  Loop, Bismarck" this way.
+
+  **The "94" address that surfaced both bugs above went on to surface a
+  third, much larger one, and is pinned BY NAME rather than left to whatever
+  discovery happens to land on.** Interstate 94, Bismarck has exactly two
+  real SSAP records, 189.5 m apart — not zero address points, and not a
+  tight same-parcel pair (`ambiguous_pair()`'s condition) either. Under the
+  pre-decision-119 ladder those two answered a query carrying no usable
+  house number, merging into a Circle (94.8 m radius, confidence 77.4)
+  because §6.3 measures spread from the centroid. That was recorded here as
+  "a third, distinct real-data outcome for a no-house-number query," and it
+  was a defect being described as a phenomenon.
+
+  Reading the response rather than the score is what exposed it. The two
+  address points are **not ramps** (empty `St_PosTyp`; the query's `Ramp`
+  scored 10.0 against `Interstate`, a term whose weight cannot move a
+  four-term average), they carry an **empty `A3`** — their "Bismarck" comes
+  only from `Post_Comm`, the postal area, which runs well past the city
+  limits the caller named — and they answered with house numbers 13100 and
+  13101, which the caller never supplied. Meanwhile the RoadCenterLine layer
+  holds **19 segments tied at matchScore 100.0**, every one of them
+  `Interstate / 94 / Ramp` with `A3` = Bismarck on both sides: an exact match
+  on every element of the query, including the two the address points failed.
+  Confidence 77.4 cleared decision 70's short-circuit at 75, so none of them
+  was ever scored. Decision 119 is the repair, and this fixture now returns
+  the rung-3 LineString.
+
+  `FWD-DROPPED-HNO-{ENH,STRICT}-001` hardcode this exact address —
+  "Interstate 94 Ramp, Bismarck" — a deliberate, one-time exception to
+  this module's own "discover by shape, never by name" rule (see the
+  module docstring), so the exact case investigated stays directly
+  comparable across future scoring/algorithm changes rather than drifting.
+  Three separate defects have now been found through this one address; that
+  is the argument for pinning it.
+
+  This took two iterations to land on. The address was first found by
+  *accident*, through the same two `rcl_only_street()` bugs described
+  above — before either was fixed, that method believed "94" satisfied
+  its own "zero address points" condition, so `FWD-DROPPED-HNO-*-001`'s
+  comment claimed a clean rung-3 LineString this address never actually
+  produced. Once fixed, discovery correctly moved off "94" onto a
+  genuinely quiet street, and a separate ID was added to keep "94"
+  available for comparison, using a new discovery method
+  (`Fixtures.sparse_scattered_street()`, since removed) to find a
+  similarly-shaped address by condition rather than by name. Collapsed
+  back to one ID pair on request, once the comment could finally describe
+  "94"'s then-real behaviour (a Circle merge) instead of a discovery
+  artifact's mistaken claim about it — and then rewritten once more by
+  decision 119, which turned that accurate description of the code into an
+  inaccurate description of what the code should have been doing. Note the
+  shape of that: the FIRST version of this comment claimed a rung-3
+  LineString, for entirely the wrong reason, and is what the fixture now
+  produces for the right one.
 - **Decision 82's deliberate absence of an A1/Country gate means an
   "ambiguous pair" query can pull in far more than the two candidates you
-  picked it for.** `FWD-AMBIG-MERGE-001` was built around a real two-unit
-  address, but on the full statewide dataset, other addresses sharing the
+  picked it for — and this one surprised a human reviewer badly enough to
+  change the specification.** `FWD-AMBIG-MERGE-001` was built around a real
+  two-unit address (705 Main Street, Underwood — two SSAP records 3.9 m
+  apart), but on the full statewide dataset, other addresses sharing the
   same house number and a fuzzy-similar street name elsewhere in the state
-  also clear `GCS_MIN_MATCH_SCORE` and join the candidate set — so the
-  strict answer is 468 (ambiguity beyond tolerance), not the tidy centroid
-  merge the fixture's name suggests. Supplying the disambiguating
-  `UnitValue` (`FWD-UNIT-DISAMBIG-001`) doesn't fix this either: decision
-  75's unit gate excludes only records with a *differing* `UnitValue`
-  populated, and the far-flung collisions typically have none to differ on.
-  Both outcomes are captured as they really are, with the mechanism
-  explained in each fixture's header comment.
+  (Washburn, Bismarck — 50+ km away) also clear `GCS_MIN_MATCH_SCORE` and
+  used to join the same §6.3 spread computation as the two real units,
+  dragging it to a 52.7 km span and failing with 468. Supplying the
+  disambiguating `UnitValue` (`FWD-UNIT-DISAMBIG-001`) didn't fix it either:
+  decision 75's unit gate excludes only records with a *differing*
+  `UnitValue` populated, and the far-flung collisions had none to differ on.
+
+  That was the behavior through decision 117. **Decision 118** closes the
+  actual gap: `GCS_MIN_MATCH_SCORE` answers "is this candidate plausible
+  enough to admit," not "is this candidate a real contender for the single
+  strict answer," and treating admission as contention was the bug. The
+  strict interface's §6.3 merge/ambiguity test now runs only within the
+  top-scoring tier of the admitted set (`_TOP_SCORE_TIE_EPSILON`,
+  `src/geocode/response_assembly.py`) — both fixtures now return clean 200s
+  (a tight Circle merge and a single Point respectively), and the far-flung
+  candidates that used to cause the 468 still appear, correctly, on
+  `GeocodeEnhanced` (`FWD-AMBIG-CANDIDATES-ENH-001`), which this decision
+  does not touch. Both outcomes are captured as they really are, with the
+  mechanism explained in each fixture's header comment.
 - **A rung-2 interpolation candidate can legitimately compute
   `match_score == 100.00000000000001`.** The first seeding run crashed with
   an uncaught `ValueError` from `MatchQuality.__post_init__`'s strict

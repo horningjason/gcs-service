@@ -16,6 +16,24 @@ failure (454) are decided above it.
 As on the forward side, this stops short of the wire. Turning a CivicAddress
 into a PIDF-LO document belongs to src/api/wire/civic_xml.py; §11.4's
 omit-rather-than-emit-empty rule serialises from CivicAddress.populated().
+
+`strict_answer` BELOW IS NOT THE HTTP ELECTION PATH
+
+It performs §12.1's "rank 1 of `answers()`" election, and every regression
+fixture and unit test that calls it directly gets the real answer — but
+`src/api/reverse_geocode.py`'s route never calls it. The route elects rank 1
+through `ReverseConversion.answer` (`src/api/conversion.py`), which reads
+`self.answers[0]` off the `ReverseConversion` the route already built for
+Stage 1/2, rather than asking this module to rebuild the list from
+`origin`/`hits` a second time. Both go through this module's own `answers()`
+and so both carry decision 122's narrowing identically — that was already
+true before this note existed, and was only verifiable by reading both call
+sites rather than by trusting this docstring, which is the gap this note
+closes (spec Appendix C.3, closed out alongside this change). Keep
+`strict_answer` around regardless: it is the function tests exercise
+directly against a bare `origin`/`hits` pair without going through admission,
+and retiring it would just make constructing a `ReverseConversion` a test
+fixture's problem instead.
 """
 
 from __future__ import annotations
@@ -167,6 +185,43 @@ def answers(
     rather than returned empty, which is distinct from §11.4's sparse-record
     case: a sparse record still has fields to report, whereas this one produced
     nothing to report.
+
+    WHERE THE INPUT SHAPE HAS EXTENT, THE LIST NARROWS TO WHAT IT CONTAINS
+    (§9, §10.3, §12.2, decision 122)
+
+    §9 is explicit that on this side "the input geometry IS the query, so its
+    extent is not metadata about the question but the substance of it." Until
+    decision 122 the extent was read for only two things — §10.3's `contained`
+    flag and §10.6's extent-damping term — while the candidate SET was bounded
+    by the flat GCS_REVERSE_SEARCH_RADIUS_M regardless of shape, so a 5 m
+    circle and a bare gml:Point retrieved an identical list. A caller who
+    asserts the target lies inside a small polygon and receives ~150
+    candidates out to 250 m has been answered a question they did not ask.
+
+    So where `origin.has_extent` and anything is contained, only the contained
+    answers are returned. This is a narrowing of an existing order, not a new
+    one: nothing is re-sorted, and because §10.3's `ordering_key` already
+    sorts contained candidates ahead of uncontained ones, the survivors are
+    exactly the prefix of the list they already formed.
+
+    Three properties this deliberately keeps:
+
+    * **A Point input is bit-for-bit unaffected.** Its extent is 0, so
+      `has_extent` is False and this branch never runs — and a Point contains
+      nothing by construction (§10.3), so there would be nothing to narrow to
+      even if it did. The commonest input in the system takes the same path it
+      always has.
+    * **Nothing contained falls back to the full list.** A tight shape over
+      empty ground — a 5 m circle in a field, a building footprint whose
+      address point sits just outside it — degrades to today's
+      nearest-within-radius behaviour rather than producing a surprising 468.
+      Refusing there would convert a data-placement accident into "no address
+      exists," which is a different and worse claim than the approximate
+      answer §10.5 already discloses the distance for.
+    * **Rank 1 does not move.** Because contained sorts first, `out[0]` was
+      already the contained candidate wherever one exists. This decision
+      changes which candidates the ENHANCED list reports, and the set rank 1
+      is elected from, never the election's outcome — see `strict_answer`.
     """
     candidates = to_candidates(origin, hits, score=score)
     out: list[ReverseAnswer] = []
@@ -174,6 +229,11 @@ def answers(
         answer = _answer_from(candidate, hit, endpoint_margin_m=endpoint_margin_m)
         if answer is not None:
             out.append(answer)
+
+    if origin.has_extent:
+        contained = [answer for answer in out if answer.contained]
+        if contained:
+            return contained
     return out
 
 
@@ -186,9 +246,34 @@ def strict_answer(
 ) -> Optional[ReverseAnswer]:
     """The single civic address the i3 interface returns (§12.1).
 
+    LIBRARY/TEST-FACING ONLY — NOT THE HTTP REQUEST PATH. The actual
+    `/ReverseGeocode` route (`src/api/reverse_geocode.py`) elects rank 1
+    through `ReverseConversion.answer` (`src/api/conversion.py`) instead,
+    off the `ReverseConversion` it already built; it does not call this
+    function. See the module docstring's own note on why both election
+    sites agree regardless. This function stays as the one that takes a bare
+    `origin`/`hits` pair, which is what every direct caller in tests/ wants
+    without going through admission.
+
     Rank 1 of the same ordered list, which is what makes the two interfaces a
     controlled comparison (§2.2). None where nothing fell within the radius —
     §12.3's 468, which is also what an empty hit list means by any other route.
+
+    Since decision 122 that list is narrowed to the contained candidates where
+    the input shape has extent and anything is contained, so rank 1 is elected
+    from the contained set rather than from everything within
+    GCS_REVERSE_SEARCH_RADIUS_M. Worth stating plainly, because it is easy to
+    misread as a behaviour change here and it is not one: §10.3's ordering
+    already sorts contained candidates ahead of uncontained ones, so rank 1
+    was ALREADY the contained candidate wherever one existed. The narrowing
+    removes candidates that were always ranked below the answer this function
+    returns. What decision 122 changes is the enhanced list (§12.2) and the
+    set this election draws from; the elected answer itself is unchanged for
+    every input shape, which the reverse regression fixtures pin directly.
+
+    The count is unchanged too. §12.1 returns exactly one civic address before
+    and after — this is not a "return the contained ones" rule on the strict
+    interface, which has no field to carry more than one answer.
 
     There is no averaging here and no counterpart to §6.3's merge: §10.4 is
     explicit that unlike the Geocode side there is no averaging a set of civic

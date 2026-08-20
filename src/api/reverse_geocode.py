@@ -131,8 +131,12 @@ async def reverse_geocode(request: Request) -> Response:
 
     # Stage 3 — §12.1. Rank 1 of the same ordered list the enhanced resource
     # returns whole, which is what makes the two a controlled comparison (§2.2).
+    # converted.answer is the one election point (src/api/conversion.py) —
+    # None is unreachable here since `found` was just verified true above,
+    # but the assert documents that rather than silently trusting it.
+    assert converted.answer is not None
     return _respond(success_xml_response(
         strict_xml.civic_address_xml(
-            conversion.reverse_document(converted.answers[0], admitted)
+            conversion.reverse_document(converted.answer, admitted)
         )
     ))

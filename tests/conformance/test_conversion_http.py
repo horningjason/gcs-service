@@ -115,6 +115,32 @@ def street_only_client(monkeypatch):
         yield c
 
 
+@pytest.fixture()
+def spread_segments_client(monkeypatch):
+    """Two centerlines sharing a street name, no address points at all, whose
+    own geometries sit several kilometres apart — FWD-DROPPED-HNO-STRICT-001's
+    shape in miniature, for decision 121 / Appendix C.2 item 9's remaining
+    half."""
+    from src import server
+    from src.gis import provisioning
+
+    scoring_stubs.install(monkeypatch)
+    monkeypatch.setattr(server, "NtpClient", lambda **kwargs: _FakeNtpClient())
+    monkeypatch.setenv("GCS_GPKG_PATH", "")
+    monkeypatch.setattr(provisioning, "_ssap", [])
+    monkeypatch.setattr(provisioning, "_rcl", [
+        _rcl(1, NGUID="{RCL-near}", geometry_wkt=(
+            f"LINESTRING ({LON - 0.004} {_RCL_LAT}, {LON + 0.004} {_RCL_LAT})"
+        )),
+        _rcl(2, NGUID="{RCL-far}", geometry_wkt=(
+            f"LINESTRING ({LON - 0.004 + 0.07} {_RCL_LAT}, "
+            f"{LON + 0.004 + 0.07} {_RCL_LAT})"
+        )),
+    ])
+    with TestClient(server.app) as c:
+        yield c
+
+
 def _pidf(resp, field: str) -> etree._Element:
     """Decision 116 — the strict 200 body is real XML, not JSON: a
     <GeodeticData>/<CivicAddress> root carrying `field` as a CDATA child.
@@ -248,6 +274,32 @@ def test_an_interpolated_house_number_returns_a_point(street_only_client):
     resp = street_only_client.post(GEOCODE, content=presence(tuple_(with_hno)))
     assert resp.status_code == 200
     assert _pidf(resp, "pidfLoGeo").find(f".//{q(NS_GML, 'Point')}") is not None
+
+
+def test_tied_rung_3_segments_beyond_tolerance_are_468(spread_segments_client):
+    """Appendix C.2 item 9's remaining half, decision 121 —
+    FWD-DROPPED-HNO-STRICT-001's shape. Two same-named segments tie at rung 3
+    with no house number in the query to break the tie on (decision 120 needs
+    one), and their own geometries disagree by several kilometres: not a
+    confident single answer, and no longer silently returned as one by NGUID
+    sort order."""
+    no_hno = CIVIC_CHUNK.replace("<ca:HNO>3401</ca:HNO>", "")
+    resp = spread_segments_client.post(
+        GEOCODE, content=presence(tuple_(no_hno)), follow_redirects=False)
+    assert resp.status_code == 468
+
+
+def test_the_same_tied_segments_still_list_fully_on_the_enhanced_interface(
+    spread_segments_client,
+):
+    """The narrowing is strict-interface only, the same shape decision 118
+    already established for the positioned rungs: GeocodeEnhanced never calls
+    resolve_segment_ambiguity, so both tied, widely-spread segments still
+    appear, ranked, with no exception raised and no candidate dropped."""
+    no_hno = CIVIC_CHUNK.replace("<ca:HNO>3401</ca:HNO>", "")
+    resp = spread_segments_client.post(GEOCODE_ENH, content=presence(tuple_(no_hno)))
+    assert resp.status_code == 200
+    assert len(resp.json()["candidates"]) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -559,3 +611,79 @@ def test_the_response_body_is_real_xml_carrying_the_pidf_lo_as_cdata(client):
     # serialised as CDATA on the wire, not entity-escaped, since that's the
     # whole point of decision 116 (real embedded newlines, not \n escapes).
     assert b"<![CDATA[" in resp.content
+
+
+# ---------------------------------------------------------------------------
+# ReverseConversion.answer — one election point, not two (decision 122's
+# follow-up, spec Appendix C.3)
+# ---------------------------------------------------------------------------
+
+def test_reverse_conversion_answer_is_rank_1_or_none():
+    """ReverseConversion.answer (src/api/conversion.py) is the single election
+    point the /ReverseGeocode route now reads instead of indexing `.answers`
+    itself — plain index 0, and None where nothing was found, mirroring
+    `.found`."""
+    from src.api.conversion import ReverseConversion
+    from src.engine.models import CivicAddress, LocationType, MatchQuality
+    from src.reverse.origin import Point
+    from src.reverse.response_assembly import ReverseAnswer
+
+    origin = Point(-100.78, 46.81).origin()
+    empty = ReverseConversion(answers=[], origin=origin)
+    assert empty.answer is None
+
+    first = ReverseAnswer(
+        civic=CivicAddress(Add_Number=701, St_Name="16th"),
+        quality=MatchQuality(match_score=95.0, location_type=LocationType.ADDRESS_POINT),
+        distance_m=0.0,
+    )
+    second = ReverseAnswer(
+        civic=CivicAddress(Add_Number=703, St_Name="16th"),
+        quality=MatchQuality(match_score=80.0, location_type=LocationType.ADDRESS_POINT),
+        distance_m=12.0,
+    )
+    populated = ReverseConversion(answers=[first, second], origin=origin)
+    assert populated.answer is first
+    assert populated.answer is populated.answers[0]
+
+
+def test_the_route_and_strict_answer_elect_the_same_candidate(client):
+    """Two election sites, one behaviour — demonstrated, not assumed. The
+    live /ReverseGeocode route elects rank 1 through ReverseConversion.answer
+    (src/api/conversion.py); src.reverse.response_assembly.strict_answer is
+    the library/test-facing election that rebuilds the same ordered list
+    from a bare origin/hits pair and sits off the HTTP path entirely (see
+    that module's own docstring). Both must agree on the same input, or
+    decision 122's narrowing would be provably inconsistent between the two
+    call sites it was supposed to unify."""
+    from src import runtime_state
+    from src.api import admission
+    from src.api.wire import gml_xml
+    from src.app import lifecycle
+    from src.engine.scoring_registry import reverse_scorer
+    from src.gis import provisioning
+    from src.reverse import origin as origin_shapes
+    from src.reverse import response_assembly as reverse_assembly
+    from src.reverse import search as reverse_search
+
+    body = presence(tuple_(_point_chunk()))
+    resp = client.post(REVERSE, content=body)
+    assert resp.status_code == 200
+    routed_hno = _pidf(resp, "pidfLoAddress").find(f".//{q(NS_CIVIC, 'HNO')}").text
+
+    admitted = admission.admit(
+        body, "application/xml", admission.Profile.GEODETIC, lifecycle._schema,
+    )
+    shape = gml_xml.parse_shape(admitted.chunk)
+    origin = origin_shapes.origin_of(shape)
+    hits = reverse_search.search(
+        origin, ssap=provisioning.ssap_records(), rcl=provisioning.rcl_records(),
+        radius_m=runtime_state._reverse_search_radius_m,
+    )
+    direct = reverse_assembly.strict_answer(
+        origin, hits, score=reverse_scorer(),
+        endpoint_margin_m=runtime_state._rcl_endpoint_margin_m,
+    )
+
+    assert direct is not None
+    assert direct.civic.Add_Number == int(routed_hno)

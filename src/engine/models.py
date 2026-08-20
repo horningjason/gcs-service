@@ -660,6 +660,30 @@ class RclGisRecord(GisRecord):
         the attribute set has no input to run on. Reporting one side's county
         and postal community anyway would assert an attribution this answer did
         not derive, so the sided elements are omitted rather than guessed.
+
+        RAISED AND CLOSED (Session 16) — omitting them even where BOTH SIDES
+        AGREE. Where A3_L == A3_R there is no value to guess between, so the
+        paragraph above looks stricter than it needs to be, and the question
+        was put to the user directly off decision 119's reseeded
+        FWD-DROPPED-HNO-ENH-001 output (a segment whose two sides both say
+        "Bismarck", reported with no community at all). Closed with NO change,
+        on a reason stronger than side-agreement: a rung-3 candidate reaches
+        here having supplied no house number, so §7.2's parity has no input
+        and scoring resolved side by decision 67/87's best-of-both-sides
+        fallback — it kept whichever side scored higher and never COMMITTED to
+        one. There is therefore no sided attribution to report regardless of
+        whether the two sides agree, and value-agreement is the wrong test:
+        it would have this method report an element the answer did not select,
+        conditional on a coincidence in the data.
+
+        The user's condition for accepting the omission was that the elements
+        still do real work behind the scenes, which was verified rather than
+        assumed: on that fixture's query, Community and A2 are live terms in
+        the rung-3 breakdown, a wrong A3 drops the best score 100.00 -> 87.49
+        and a wrong A2 100.00 -> 92.20, and A3 separates the real 202-candidate
+        set cleanly (A3="Bismarck" 94.28-100.00, unattributed 74.70-94.54,
+        A3="Mandan" 71.08-79.13). The elements order the answer; they are just
+        not reported as attribution the answer never derived.
         """
         return CivicAddress(**{
             element: getattr(self.source, element)

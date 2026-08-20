@@ -130,6 +130,23 @@ def test_a_point_has_no_extent_and_therefore_contains_nothing():
     assert origin.shape.contains(LON, LAT) is False
 
 
+@pytest.mark.parametrize("name", sorted(n for n in ALL_EIGHT if n != "Point"))
+def test_every_shape_but_point_has_extent(name):
+    """Decision 122's reverse-candidate narrowing (src/reverse/response_
+    assembly.py::answers) keys off SearchOrigin.has_extent alone, with no
+    shape-specific branch — it is correct only if every one of the seven
+    shapes besides Point actually reports one. A future shape added to
+    src/reverse/origin.py without populating `extent_m` would silently never
+    narrow anything for that shape, and this is the cheap guard against
+    that: run it against real (non-degenerate) dimensions for all seven and
+    it must always be True, in contrast to test_a_point_has_no_extent_
+    and_therefore_contains_nothing's False."""
+    xml_text, _ = ALL_EIGHT[name]
+    origin = shapes.origin_of(_parse(xml_text))
+    assert origin.has_extent is True
+    assert origin.extent_m > 0.0
+
+
 def test_a_circle_yields_its_centre_and_its_radius_as_extent():
     origin = shapes.origin_of(_parse(CIRCLE))
     assert origin.latitude == pytest.approx(46.81)
@@ -314,3 +331,100 @@ def test_confidence_validates_against_the_master_schema():
             gml_xml.to_string(gml_xml.build_confidence(value)).encode("utf-8")
         )
         assert schema.validate(element), schema.error_log.last_error
+
+
+# ---------------------------------------------------------------------------
+# gml:posList srsDimension (schema gap closed alongside REV-PRISM-ENH-001,
+# next decision after 122)
+# ---------------------------------------------------------------------------
+#
+# Stock OGC GML 3.1.1 (schemas/gml-geoshape/geometryBasic0d1d.xsd's own
+# version="3.1.1") declares srsDimension once, on AbstractGeometryType via
+# SRSReferenceGroup — on the geometry ELEMENT, not on the coordinate list —
+# so DirectPositionListType (gml:posList's type) originally carried only
+# `count`. gml_xml.py::_ring_vertices reads srsDimension directly off the
+# posList element instead (GML 3.2 / ISO 19136's convention, and where
+# real-world posList producers commonly put it), so the parser could always
+# read a 3D posList that the schema had no attribute declaration to admit —
+# found building REV-PRISM-ENH-001 (tests/regression/build_inputs.py), which
+# uses the schema-valid gml:pos-per-vertex spelling instead precisely because
+# this form 454s without the fix these tests confirm.
+
+def test_a_3d_poslist_with_srsdimension_now_validates_against_the_schema():
+    """The gap: the parser has read srsDimension off <gml:posList> since
+    before this fix, and until now the schema was the only reason a caller
+    who actually used it got a 454. REV-PRISM-ENH-001's own fixture is left
+    on the gml:pos spelling deliberately (see prism_chunk's docstring) — this
+    pins the posList spelling directly instead, as its own conformance
+    property rather than folding it into that fixture."""
+    from src.app import lifecycle
+
+    schema = lifecycle._load_schema()
+    assert schema is not None
+
+    xml_text = f"""<gs:Prism {NS}>
+      <gs:base><gml:Polygon><gml:exterior><gml:LinearRing>
+        <gml:posList srsDimension="3">46.809 -100.781 500 46.811 -100.781 500
+                                      46.811 -100.779 500 46.809 -100.779 500
+                                      46.809 -100.781 500</gml:posList>
+      </gml:LinearRing></gml:exterior></gml:Polygon></gs:base>
+      <gs:height uom="urn:ogc:def:uom:EPSG::9001">30</gs:height>
+    </gs:Prism>"""
+    element = etree.fromstring(xml_text.encode("utf-8"), XML_PARSER)
+    assert schema.validate(element), schema.error_log.last_error
+
+    # And the parser reads it exactly as it always has — the fix is schema-
+    # side only, nothing here changed in gml_xml.py.
+    shape = gml_xml.parse_shape(element)
+    assert shape.base_altitude == pytest.approx(500.0)
+    assert len(shape.vertices) == 4
+
+
+def test_a_2d_poslist_with_srsdimension_still_validates():
+    """The additive attribute is optional and defaults to nothing special —
+    the ordinary 2D case (no srsDimension at all, POLYGON's own constant)
+    keeps validating exactly as before, and an explicit srsDimension="2" is
+    equally legal."""
+    from src.app import lifecycle
+
+    schema = lifecycle._load_schema()
+    element = etree.fromstring(POLYGON.encode("utf-8"), XML_PARSER)
+    assert schema.validate(element), schema.error_log.last_error
+
+    explicit_2d = f"""<gml:Polygon {NS}><gml:exterior><gml:LinearRing>
+      <gml:posList srsDimension="2">46.809 -100.781 46.811 -100.781
+                                    46.811 -100.779 46.809 -100.781</gml:posList>
+    </gml:LinearRing></gml:exterior></gml:Polygon>"""
+    element = etree.fromstring(explicit_2d.encode("utf-8"), XML_PARSER)
+    assert schema.validate(element), schema.error_log.last_error
+
+
+def test_the_schema_still_rejects_a_non_numeric_srsdimension():
+    """The widened schema must not have widened past `positiveInteger` —
+    still an actual type constraint, not free text, so this stays a 454
+    caught at admission rather than reaching the parser at all."""
+    from src.app import lifecycle
+
+    schema = lifecycle._load_schema()
+    xml_text = f"""<gml:Polygon {NS}><gml:exterior><gml:LinearRing>
+      <gml:posList srsDimension="three">46.809 -100.781 46.811 -100.781
+                                        46.811 -100.779 46.809 -100.781</gml:posList>
+    </gml:LinearRing></gml:exterior></gml:Polygon>"""
+    element = etree.fromstring(xml_text.encode("utf-8"), XML_PARSER)
+    assert schema.validate(element) is False
+
+
+def test_an_unsupported_srsdimension_that_passes_the_schema_is_still_caught_at_parse():
+    """positiveInteger admits values the schema has no reason to reject
+    (there's nothing dimension-specific about the XSD type) but this parser
+    only understands 2 and 3 ordinates per position. The schema widening in
+    this fix must not have quietly removed gml_xml.py's own runtime guard as
+    the actual, still-necessary line of defense against a technically-valid,
+    semantically-nonsensical srsDimension="5"."""
+    xml_text = f"""<gml:Polygon {NS}><gml:exterior><gml:LinearRing>
+      <gml:posList srsDimension="5">46.809 -100.781 0 0 0
+                                    46.811 -100.781 0 0 0
+                                    46.811 -100.779 0 0 0</gml:posList>
+    </gml:LinearRing></gml:exterior></gml:Polygon>"""
+    with pytest.raises(GmlParseError, match="unsupported srsDimension"):
+        _parse(xml_text)

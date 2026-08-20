@@ -251,6 +251,90 @@ def test_the_enhanced_answer_carries_what_the_strict_one_discards():
     assert listed[0].confidence == pytest.approx(60.0)
 
 
+# ---------------------------------------------------------------------------
+# Decision 122 — a shape with extent narrows the list to what it contains
+# (§9, §10.3, §12.2)
+# ---------------------------------------------------------------------------
+
+def test_a_shape_with_extent_returns_only_what_it_contains():
+    """§9 — the input geometry IS the query on this side, so its extent is the
+    substance of the question rather than metadata about it. A caller who
+    asserts the target lies inside a 30 m circle must not be handed the
+    address points 200 m outside it that the flat search radius also
+    retrieved. The relative order of the survivors is §10.3's, unchanged."""
+    origin, hits = _hits_at(
+        -100.7900, 46.8100,
+        ssap=[_ssap_record(1, lon=-100.7900, lat=46.81005, St_Name="16th"),
+              _ssap_record(2, lon=-100.7900, lat=46.81010, St_Name="16th"),
+              _ssap_record(3, lon=-100.7900, lat=46.81200, St_Name="16th")],
+        shape=shapes.Circle(-100.7900, 46.8100, 30.0),
+    )
+    listed = response_assembly.answers(
+        origin, hits, score=flat, endpoint_margin_m=MARGIN)
+
+    assert [a.contained for a in listed] == [True, True]
+    assert listed[0].distance_m < listed[1].distance_m
+
+
+def test_a_shape_with_extent_containing_nothing_falls_back_to_the_full_list():
+    """The deliberate fallback: a tight shape over empty ground — a small
+    circle in a field, or a footprint whose address point sits just outside
+    it — degrades to nearest-within-radius rather than 468. Refusing there
+    would turn a data-placement accident into "no address exists," which is a
+    different and worse claim than the approximate answer §10.5 already
+    discloses the distance for."""
+    origin, hits = _hits_at(
+        -100.7900, 46.8100,
+        ssap=[_ssap_record(1, lon=-100.7900, lat=46.81100, St_Name="16th"),
+              _ssap_record(2, lon=-100.7900, lat=46.81200, St_Name="16th")],
+        shape=shapes.Circle(-100.7900, 46.8100, 5.0),
+    )
+    listed = response_assembly.answers(
+        origin, hits, score=flat, endpoint_margin_m=MARGIN)
+
+    assert len(listed) == 2
+    assert all(a.contained is False for a in listed)
+
+
+def test_a_point_input_is_unaffected_by_the_narrowing():
+    """A Point's extent is 0, so `has_extent` is False and the branch never
+    runs — and a Point contains nothing by construction (§10.3), so there
+    would be nothing to narrow to even if it did. The commonest input in the
+    system takes exactly the path it always has."""
+    origin, hits = _hits_at(
+        -100.7900, 46.8100,
+        ssap=[_ssap_record(1, lon=-100.7900, lat=46.81005, St_Name="16th"),
+              _ssap_record(2, lon=-100.7900, lat=46.81200, St_Name="16th")],
+    )
+    listed = response_assembly.answers(
+        origin, hits, score=flat, endpoint_margin_m=MARGIN)
+
+    assert len(listed) == 2
+    assert origin.has_extent is False
+
+
+def test_the_narrowing_does_not_move_rank_1():
+    """§10.3's ordering already sorts contained candidates ahead of
+    uncontained ones, so rank 1 was ALREADY the contained candidate wherever
+    one existed. Decision 122 removes candidates that were always ranked
+    below the strict answer — pinned here so a future re-sort of the reverse
+    ordering cannot quietly make this decision change the i3 answer."""
+    args = dict(
+        ssap=[_ssap_record(1, lon=-100.7900, lat=46.81200, St_Name="16th"),
+              _ssap_record(2, lon=-100.7900, lat=46.81005, St_Name="16th")],
+    )
+    with_extent, hits_extent = _hits_at(
+        -100.7900, 46.8100, shape=shapes.Circle(-100.7900, 46.8100, 30.0), **args)
+    as_point, hits_point = _hits_at(-100.7900, 46.8100, **args)
+
+    narrowed = response_assembly.strict_answer(
+        with_extent, hits_extent, score=flat, endpoint_margin_m=MARGIN)
+    unnarrowed = response_assembly.strict_answer(
+        as_point, hits_point, score=flat, endpoint_margin_m=MARGIN)
+
+    assert narrowed.civic == unnarrowed.civic
+
+
 def test_the_interpolated_flag_marks_a_computed_number():
     origin, hits = _hits_at(
         -100.790, 46.8105,

@@ -66,7 +66,52 @@ Two exclusions are not part of this rule and remain in force. §3.4's temporal
 filter is a correctness test, not a narrowing one — a record outside its
 Effective/Expire window is wrong rather than merely unlikely — and is applied
 before scoring. GCS_MIN_MATCH_SCORE (§6.4) applies after every record has been
-scored, so it discards nothing unseen.
+scored, so it discards nothing unseen. This candidate set — everyone who
+cleared the floor — is what GeocodeEnhanced returns and what this module
+hands onward. What the STRICT interface does with it is narrower still:
+decision 118 (src/geocode/response_assembly.py::strict_answer) restricts
+§6.3's own ambiguity/merge test to the top-scoring tier of that set, so a
+candidate that is merely admissible never gets to blow up a real, tightly
+clustered merge among the genuine leaders. That narrowing happens one layer
+up from here, not in this module — nothing in candidate identification
+itself discards a low-but-admissible scorer.
+
+RUNG 1 IS NOT APPLICABLE WITHOUT A HOUSE NUMBER (§5, §6.1, decision 119)
+
+`ssap_candidates` returns an empty list — without calling the scorer once —
+when the query supplies no usable Add_Number. Two ways in: the caller sent no
+`ca:HNO` at all, or sent one that decision 63 dropped because it does not
+reduce to a non-negative integer.
+
+This reads at first like the filter decision 61 abolished and like the
+administrative gate decision 82 declined, and it is neither. Both of those
+govern which RECORDS may answer a question the rung is capable of answering.
+This governs whether the rung is capable of answering the question at all. An
+address point's identity is its house number — that is decision 69's whole
+premise, and the reason Add_Number is a gate rather than a scored term — so a
+query with no house number has nothing for rung 1 to be an answer to. Every
+position rung 1 could return in that case asserts a house number the caller
+never supplied and the service has no basis to choose among: given "Interstate
+94 Ramp, Bismarck" it replies "13101 Interstate 94," which is a different
+address, not a less precise version of the one asked about.
+
+Nor is it Gate 1 (§5, decision 14). Gate 1 would REFUSE the request. Nothing
+here refuses anything: the request is admitted, scored, and answered, at rung
+3, which is exactly what §5, decision 63 and §15.1 step 4 have said all along.
+Before decision 119 they said it and the ladder did not do it — with rung 1
+searched unconditionally and decision 69's gate silent for want of a query
+house number, every address point on the named street was scored, and a rung-1
+best at or above the INTERPOLATED_POINT ceiling then short-circuited the road
+scan entirely (see the ladder section below). The street-level answer the spec
+promised was reachable only when the SSAP layer happened to hold nothing on
+that street.
+
+One consequence, stated rather than hidden: a street carrying address points
+but no centerline record now yields 468 for a house-number-free query where it
+previously returned a point. That is §6.4's honest failure and is listed there
+as a path in its own right. It requires a provisioning defect — RoadCenterLine
+is Required for the GCS under STA-006.3 Table 4-1 — and returning a wrong
+house number is not the better answer to it.
 
 LAYER ORDER IS A LADDER, AND THE RUNGS COMPETE ON CONFIDENCE (§3.3, §6.1,
 decision 70)
@@ -113,14 +158,18 @@ NO GATE 1 (§5, decision 14)
 Nothing here requires a house number, a street, or any other element. i3 §4.5
 imposes no structural precondition on Geocode and adding one would be a
 restriction the standard does not have. A query with no HNO is accepted and
-answered at rung 3; a query with an HNO that no segment asserts falls to rung 3
-the same way, which §5 flags as the more dangerous case precisely because it
-degrades silently — the honesty burden lands on §7.4's tier and confidence.
+answered at rung 3 — decision 119 above is what makes that true in the ladder
+rather than only in the prose, and is an applicability rule for one rung, not
+a precondition on the request; a query with an HNO that no segment asserts
+falls to rung 3 the same way, which §5 flags as the more dangerous case
+precisely because it degrades silently — the honesty burden lands on §7.4's
+tier and confidence.
 """
 
 from __future__ import annotations
 
 import datetime
+import math
 import os
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Optional, Protocol, Sequence
@@ -230,6 +279,69 @@ def _rank(candidates: list[Candidate]) -> list[Candidate]:
     )
 
 
+def range_gap(record: RclGisRecord, house_number: int) -> float:
+    """Decision 120 — how far `house_number` sits outside a segment's own
+    asserted address range(s), 0 where a side's range already contains it.
+
+    Every side present is considered, not only the parity-preferred one
+    (`position.select_side`): this runs on rung-3 candidates specifically
+    because no side claimed the number (or the segment was otherwise
+    unusable for interpolation), so there is no "correct" side left to
+    prefer — only a proximity estimate, for which either side's range is
+    equally informative. `math.inf` where the record asserts no range at
+    all, so it sorts behind every candidate that does.
+
+    Not module-private (no leading underscore) since decision 121:
+    `response_assembly.strict_answer` needs this exact function, not a
+    reimplementation of it, to narrow the ambiguity-check tier on the same
+    key `_rank_segments` below ranks by — see that function's own docstring
+    for why matchScore alone is too coarse a tier for the ambiguity check.
+    """
+    ranges = position_derivation.side_ranges(record)
+    if not ranges:
+        return math.inf
+    return min(max(r.low - house_number, house_number - r.high, 0) for r in ranges)
+
+
+def _rank_segments(
+    candidates: list[Candidate], house_number: Optional[int]
+) -> list[Candidate]:
+    """§7.4 ranking for rung-3 segments (Appendix C.2 item 9, decision 120).
+
+    Same blended-confidence ordering as `_rank`, with one addition: rung 3's
+    matchScore carries no house-number term (interpolation already failed,
+    by definition, for every candidate here), so every segment sharing a
+    street name ties at identical confidence and matchScore regardless of
+    how far its own address range sits from the query's house number.
+    `_rank`'s NGUID tiebreak resolved that arbitrarily — alphabetically,
+    with no relationship to the corridor — which is how a query for 1911
+    could land on a segment numbered in the 3000s while segments bracketing
+    the actual gap sat unchosen in the tied set.
+
+    Where the query supplies a house number, ties are now broken by
+    `range_gap` before NGUID: the segment whose own range sits closest to
+    the query wins, which is a geographically meaningful choice `_rank`'s
+    tiebreak could not express. Where it does not
+    (`FWD-DROPPED-HNO-STRICT-001`'s shape — no house number to measure a gap
+    against at all), this reduces to `_rank` exactly, and the tie is left
+    exactly as arbitrary as `_rank`'s NGUID order always was — closing that
+    gap is `resolve_segment_ambiguity`'s job (decision 121), not this
+    function's; this function only orders candidates; it does not decide
+    which of them is trustworthy enough to return.
+    """
+    if house_number is None:
+        return _rank(candidates)
+    return sorted(
+        candidates,
+        key=lambda c: (
+            -c.confidence,
+            -c.match_score,
+            range_gap(c.record, house_number),
+            c.nguid or "",
+        ),
+    )
+
+
 def _unit_matches(query_value: str, record_value: str) -> bool:
     """Decision 75 — trim + casefold before comparing. UnitPreTyp ("Apt",
     "Unit", "Suite") plays no part in this gate, only UnitValue itself."""
@@ -246,15 +358,27 @@ def ssap_candidates(
 ) -> list[Candidate]:
     """Rung 1 — address points.
 
-    Every temporally-valid record is scored (decision 61); nothing is excluded
-    on a civic element before the scorer sees it — except house number and
-    unit, both hard gates rather than scored fields (decisions 69 and 75).
+    Returns nothing at all when the query supplies no usable Add_Number
+    (decision 119). That is an applicability test for the rung, not a filter
+    over the candidate set: an address point's identity IS its house number,
+    so with no house number in the query there is no question for this rung
+    to answer, and every position it could return would assert an element the
+    caller never supplied. §5's promise — a street-level query is accepted and
+    answered at rung 3 — is delivered here rather than merely asserted. See
+    RUNG 1 IS NOT APPLICABLE WITHOUT A HOUSE NUMBER in the module docstring
+    for why this is neither Gate 1 (§5, decision 14) nor a reversion of
+    decision 61.
+
+    Otherwise every temporally-valid record is scored (decision 61); nothing
+    is excluded on a civic element before the scorer sees it — except house
+    number and unit, both hard gates rather than scored fields (decisions 69
+    and 75).
 
     A record whose Add_Number does not exactly equal the query's is excluded
-    before scoring, not scored low — see decision 69. Only applies when the
-    query supplies a house number; a query with none (rung-3-shaped, but still
-    directed at SSAP first per the ladder) is unaffected and every temporally
-    valid record is still scored.
+    before scoring, not scored low — see decision 69. That gate and decision
+    119's applicability test are the two halves of one rule: 69 governs which
+    records answer a house-number query, 119 governs whether there is a
+    house-number query to answer.
 
     A record whose UnitValue disagrees with the query's is excluded the same
     way — see decision 75 and _unit_matches below — but ONLY when the record
@@ -267,12 +391,22 @@ def ssap_candidates(
     flagged on the record for whoever consumes data quality; it is simply not an
     answer to a question about where something is.
     """
+    # Decision 119 — before anything else, and before the scorer is called
+    # even once. Not a `continue` inside the loop: no SSAP record is a
+    # candidate for a query with no house number, so there is nothing to
+    # iterate.
+    if query.Add_Number is None:
+        return []
+
     ssap_layer = os.environ.get("GCS_SSAP_LAYER", "SiteStructureAddressPoint")
     out: list[Candidate] = []
     for record in records:
         if not is_active(record, at):
             continue
-        if query.Add_Number is not None and record.Add_Number != query.Add_Number:
+        # Decision 69 — identity, not similarity. Unconditional here because
+        # decision 119's early return above already guarantees the query has
+        # a house number to compare against.
+        if record.Add_Number != query.Add_Number:
             continue
         if (
             query.UnitValue is not None
@@ -319,6 +453,10 @@ def rcl_candidates(
     answer, not a ranked continuum. A segment that can carry the query's house
     number produces a rung-2 candidate; the same segment produces a rung-3
     candidate when it cannot, or when the query carried no house number at all.
+    The rung-3 set is ranked by `_rank_segments`, not `_rank` (decision 120):
+    where the query supplies a house number, ties among identically-scored
+    segments are broken by proximity of the segment's own range to that
+    number rather than by NGUID alone.
     """
     rcl_layer = os.environ.get("GCS_RCL_LAYER", "RoadCenterLine")
     interpolated: list[Candidate] = []
@@ -380,7 +518,7 @@ def rcl_candidates(
             )
         )
 
-    return _rank(interpolated), _rank(segments)
+    return _rank(interpolated), _rank_segments(segments, query.Add_Number)
 
 
 def identify(
@@ -401,6 +539,13 @@ def identify(
     rung-1 best at or above the INTERPOLATED_POINT ceiling cannot be beaten by
     any road answer, so the RCL layer is not scored at all in that case. Ties
     go to the more precise rung.
+
+    A query with no usable Add_Number produces no rung-1 candidates at all
+    (decision 119, in ssap_candidates), so the ladder starts at rung 2 — which
+    is itself empty for want of a number to interpolate — and lands on rung 3.
+    The short-circuit above is therefore unreachable for such a query, which
+    is the point: it was the mechanism by which a rung-1 answer nobody asked
+    for suppressed the road scan that held the real one.
 
     Empty where no rung produced anything. §6.4 enumerates several distinct
     paths to that outcome — the layer held no record in force, none cleared
@@ -462,6 +607,96 @@ class MergedPosition:
         return len(self.merged_from) > 1
 
 
+def _segment_spread_m(candidates: Sequence[Candidate]) -> float:
+    """Greatest pairwise geodesic distance between rung-3 candidates' own
+    segment midpoints. 0.0 for fewer than two candidates.
+
+    The rung-3 sibling of what `resolve_ambiguity` measures on positions: a
+    segment set has no positions to average (§7.4, decision 30 — the line
+    geometry IS the answer), so "how far apart do these candidates disagree"
+    has to be measured on the geometries themselves. Midpoint
+    (`geometry.midpoint`), not an endpoint or a centroid of every vertex, for
+    the same reason decision 48 already picked it for a single segment's own
+    answer position: §3.7.3's minimise-maximum-error principle bounds the
+    worst case at half a segment's length, where an endpoint could be a full
+    segment length off and a plain vertex-average centroid is skewed by
+    however densely each segment happens to be digitised, which is a
+    cartographic accident, not a signal.
+    """
+    if len(candidates) < 2:
+        return 0.0
+    midpoints = [
+        geometry.midpoint(geometry.vertices_of(c.answer_geometry))
+        for c in candidates
+    ]
+    return max(
+        geometry.distance_m(a[0], a[1], b[0], b[1])
+        for i, a in enumerate(midpoints)
+        for b in midpoints[i + 1 :]
+    )
+
+
+def resolve_segment_ambiguity(
+    candidates: Sequence[Candidate],
+    *,
+    tolerance_m: float,
+) -> Candidate:
+    """Appendix C.2 item 9's remaining half (`FWD-DROPPED-HNO-STRICT-001`),
+    closed by the decision following 120.
+
+    Decision 120 broke rung-3 ties by proximity of a segment's own address
+    range to the query's house number — but only when the query supplies one.
+    Without one, `_rank_segments` falls back to `_rank`, and every
+    same-named segment ties at identical confidence and matchScore, with
+    NGUID breaking the tie alphabetically and no geographic meaning at all.
+    On real data (the I-94 corridor fixture this closes) that silently
+    returns one of 19 segments spread roughly 7 km, indistinguishable from a
+    confident single answer.
+
+    This is that rung's version of what `resolve_ambiguity` already does for
+    positioned candidates: measure the spread of the tied leaders and refuse
+    to answer, rather than hand back an arbitrary pick, when they actually
+    disagree. It cannot merge — there is no average of two line segments
+    that means anything (§7.4, decision 30) — so it can only pick the ranked
+    leader or raise `AmbiguousResult`, the same exception `resolve_ambiguity`
+    raises, reused as-is rather than adding a second status code for what is
+    the same failure at a different rung.
+
+    THIS FUNCTION DOES NOT KNOW ABOUT HOUSE NUMBERS, DELIBERATELY. An early
+    version of decision 121 narrowed the tier by matchScore alone before
+    calling this, and that caught `FWD-DROPPED-HNO-STRICT-001` correctly but
+    also caught `FWD-GAP-HNO-001` — decision 120's own fixture, HNO supplied,
+    `range_gap` already narrowing it to one real segment (the 1901-1909
+    block) — because rung 3's matchScore carries no house-number term, so
+    matchScore alone cannot see that decision 120 already resolved that tie.
+    The fix is not to make this function HNO-aware; it is for the CALLER
+    (`response_assembly.strict_answer`) to narrow `candidates` on the same
+    key `_rank_segments` ranks by — matchScore, then `range_gap` where a
+    house number is available — before calling this, so what arrives here
+    already excludes anyone `_rank_segments` itself distinguished. This
+    function only ever answers one question about whatever set it is
+    actually handed: do these still-tied leaders sit close enough together
+    to be one answer.
+
+    `tolerance_m` is `GCS_AMBIGUITY_TOLERANCE_M`, the same knob
+    `resolve_ambiguity` uses, deliberately not a second tuning value: "are
+    these tied candidates actually the same answer" is one question asked at
+    two rungs, not two questions.
+
+    Returns `candidates[0]` unchanged for fewer than two candidates — nothing
+    to be ambiguous about. Otherwise returns `candidates[0]` (already ranked
+    by `_rank_segments`, so the leader by construction) when the spread is
+    within tolerance, and raises `AmbiguousResult` when it is not.
+    """
+    if len(candidates) < 2:
+        return candidates[0]
+
+    spread_m = _segment_spread_m(candidates)
+    if spread_m > tolerance_m:
+        raise AmbiguousResult(spread_m, tolerance_m, len(candidates))
+    return candidates[0]
+
+
 def resolve_ambiguity(
     candidates: Sequence[Candidate],
     *,
@@ -481,6 +716,14 @@ def resolve_ambiguity(
     `tolerance_m` has no specification-level default and is required
     configuration (decision 54) — the value is deployment-specific and comes
     from .env, so this function is handed it rather than reading it.
+
+    This function does not decide WHICH candidates take part — it applies
+    §6.3 to whatever set it is handed. `strict_answer`
+    (src/geocode/response_assembly.py) is the caller that narrows the set to
+    the top-scoring tier before calling this (decision 118); a caller that
+    hands this every admitted candidate regardless of score gets the older,
+    wider test back, which is why that narrowing lives one layer up rather
+    than here.
     """
     positioned = [c for c in candidates if c.position is not None]
     if not positioned:

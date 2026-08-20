@@ -68,12 +68,19 @@ this style exists to prevent.
 Working state lives in **Appendix C**: C.2 open questions, C.3 undrafted
 sections, C.4 implementation-discovered questions (cited from code and tests —
 the numbering is stable and retained even once resolved). Every C.4 question
-was resolved and C.3 emptied as of Session 11, and nothing has reopened either
-since — decisions 107-117 (Sessions 12-15) closed deferred-implementation
-items and corrected two wire-format findings rather than raising new spec
-questions, so both stay empty through the current decision count. What
-remains open is the §16 gap register (NENA-facing) and the deferred
-implementation work below.
+was resolved and C.3 emptied as of Session 11, and neither has reopened —
+decisions 107-119 (Sessions 12-16) closed deferred-implementation items,
+corrected two wire-format findings, and fixed two real defects in §6 (decision
+118's ambiguity scope, decision 119's rung-1 applicability).
+
+**C.2 is open again as of Session 16**, and is the one place to look for live
+specification questions: decision 119 left item 9 there deliberately rather
+than answering it in passing — rung 3 has no ambiguity test at all, so the
+strict interface resolves a tie among segments by silently returning the
+first, currently one of 19 tied segments spread ~7 km. Read the item before
+touching `strict_answer`'s no-position branch; it enumerates the candidate
+answers and why none was picked yet. Otherwise what remains open is the §16
+gap register (NENA-facing) and the deferred implementation work below.
 
 ## Architecture
 

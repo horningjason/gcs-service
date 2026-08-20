@@ -91,8 +91,15 @@ def _pretty_body(text: str) -> str:
 def main() -> None:
     initialize()
 
+    # CASES is ordered narratively in manifest.py (grouped by ADM/FWD/REV,
+    # not alphabetically within each group). Sorted here by case.id instead,
+    # matching how tests/regression/inputs/*.xml sorts in VS Code's Explorer
+    # (plain alphabetical — every fixture is FLAT under one directory with a
+    # zero-padded numeric suffix, so lexicographic and natural sort agree).
+    ordered_cases = sorted(CASES, key=lambda c: c.id)
+
     sections: list[str] = []
-    for case in CASES:
+    for case in ordered_cases:
         request_text = (INPUTS_DIR / f"{case.id}.xml").read_text(encoding="utf-8")
         response = dispatch(case)
 
@@ -108,7 +115,7 @@ def main() -> None:
         sections.append("")
 
     OUT_PATH.write_text("\n".join(sections), encoding="utf-8")
-    print(f"Wrote {len(CASES)} request/response pairs to {OUT_PATH}")
+    print(f"Wrote {len(ordered_cases)} request/response pairs to {OUT_PATH}")
 
 
 if __name__ == "__main__":

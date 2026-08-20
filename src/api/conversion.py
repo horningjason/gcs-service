@@ -105,12 +105,23 @@ def geocode(admitted: AdmittedRequest) -> ForwardConversion:
 
 
 def strict_forward_answer(conversion: ForwardConversion) -> Optional[ForwardAnswer]:
-    """Rank 1, or §6.3's merge. Raises AmbiguousResult beyond tolerance."""
+    """Rank 1, or §6.3's merge. Raises AmbiguousResult beyond tolerance.
+
+    `house_number` is threaded through from the elected query (decision 121)
+    so a rung-3 ambiguity check can narrow by `range_gap` the same way
+    `_rank_segments` already ranks by it — see
+    `response_assembly.strict_answer`'s own docstring for why matchScore
+    alone is not a fine enough tier there. `conversion.query.Add_Number` is
+    already `None` for exactly the cases where there is nothing to narrow by
+    (decision 63's drop, or no HNO in the request at all), so no separate
+    "was there a house number" test is needed here.
+    """
     from src import runtime_state
 
     return forward_assembly.strict_answer(
         conversion.candidates,
         tolerance_m=runtime_state._ambiguity_tolerance_m,
+        house_number=conversion.query.Add_Number,
     )
 
 
@@ -188,6 +199,15 @@ class ReverseConversion:
     @property
     def found(self) -> bool:
         return bool(self.answers)
+
+    @property
+    def answer(self) -> Optional[ReverseAnswer]:
+        """Rank 1 (§12.1) — the single election point for the strict route.
+
+        `self.answers` already carries decision 122's narrowing (reverse_
+        assembly.answers), so this is plain index 0, not a second election.
+        """
+        return self.answers[0] if self.answers else None
 
 
 def reverse_geocode(admitted: AdmittedRequest) -> ReverseConversion:

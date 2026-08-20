@@ -15,6 +15,7 @@ import os
 
 import pytest
 
+from src.engine import geometry
 from src.engine.models import CivicAddress, LocationType
 from src.geocode import candidates
 from src.geocode.candidates import AmbiguousResult
@@ -160,9 +161,21 @@ def test_a_rung_confidence_tie_goes_to_the_more_precise_rung():
 
 def test_a_query_with_no_house_number_is_accepted_at_rung_3():
     """i3 §4.5 imposes no structural precondition on Geocode. A street-level
-    query is answered with the segment, not refused."""
+    query is answered with the segment, not refused.
+
+    The SSAP records are the point of this fixture, not scenery. Until
+    decision 119 this test passed only because it provisioned none: rung 1 was
+    searched unconditionally, so any address point on the named street scored,
+    and a rung-1 best at or above the INTERPOLATED_POINT ceiling then
+    short-circuited the road scan entirely — §5's promised street-level answer
+    was reachable only where the SSAP layer happened to hold nothing.
+    """
     found = _identify(
         CivicAddress(St_Name="16th"),
+        ssap=[
+            _ssap(1, Add_Number=415, St_Name="16th"),
+            _ssap(2, Add_Number=417, St_Name="16th"),
+        ],
         rcl=[_rcl(1, St_Name="16th", FromAddr_L=100, ToAddr_L=200, Parity_L="E")],
     )
 
@@ -198,11 +211,11 @@ def test_every_temporally_valid_record_reaches_the_scorer():
         return 100.0, {}
 
     _identify(
-        CivicAddress(A1="ND", A2="Burleigh", St_Name="16th"),
+        CivicAddress(A1="ND", A2="Burleigh", St_Name="16th", Add_Number=415),
         ssap=[
-            _ssap(1, A1="ND", A2="Burleigh", St_Name="16th"),
-            _ssap(2, A1="ND", A2="Morton", St_Name="16th"),
-            _ssap(3, A1="MN", A2="Clay", St_Name="Nowhere"),
+            _ssap(1, A1="ND", A2="Burleigh", St_Name="16th", Add_Number=415),
+            _ssap(2, A1="ND", A2="Morton", St_Name="16th", Add_Number=415),
+            _ssap(3, A1="MN", A2="Clay", St_Name="Nowhere", Add_Number=415),
         ],
         score=recording,
     )
@@ -217,8 +230,8 @@ def test_a_mismatched_county_is_scored_and_can_be_returned():
     permanently, and a caller's typo or a record's own data defect should
     produce a low score, not a 468."""
     found = _identify(
-        CivicAddress(A2="Burleigh", St_Name="16th"),
-        ssap=[_ssap(1, A2="Morton", St_Name="16th")],
+        CivicAddress(A2="Burleigh", St_Name="16th", Add_Number=415),
+        ssap=[_ssap(1, A2="Morton", St_Name="16th", Add_Number=415)],
         score=lambda q, r: (82.0, {}),
         min_match_score=60.0,
     )
@@ -232,8 +245,9 @@ def test_a_mismatched_state_or_city_is_scored_the_same_way():
     exactly as A2 does not."""
     for element in ("A1", "A3", "MSAGComm", "Post_Code", "Country"):
         found = _identify(
-            CivicAddress(St_Name="16th", **{element: "QUERY"}),
-            ssap=[_ssap(1, St_Name="16th", **{element: "RECORD"})],
+            CivicAddress(St_Name="16th", Add_Number=415, **{element: "QUERY"}),
+            ssap=[_ssap(1, St_Name="16th", Add_Number=415,
+                        **{element: "RECORD"})],
             score=lambda q, r: (75.0, {}),
         )
         assert [c.record.fid for c in found] == [1], element
@@ -248,11 +262,11 @@ def test_a_mismatched_administrative_element_costs_score_not_candidacy():
         return (100.0 if same else 65.0), {"A2": 100.0 if same else 65.0}
 
     found = _identify(
-        CivicAddress(A2="Burleigh", St_Name="16th"),
+        CivicAddress(A2="Burleigh", St_Name="16th", Add_Number=415),
         ssap=[
-            _ssap(1, A2="Morton", St_Name="16th",
+            _ssap(1, A2="Morton", St_Name="16th", Add_Number=415,
                   geometry_wkt="POINT (-100.780 46.810)"),
-            _ssap(2, A2="Burleigh", St_Name="16th",
+            _ssap(2, A2="Burleigh", St_Name="16th", Add_Number=415,
                   geometry_wkt="POINT (-100.781 46.810)"),
         ],
         score=by_county,
@@ -267,8 +281,8 @@ def test_the_street_name_is_left_to_the_scorer():
     unreachable — "Mayne St" would never reach §6.5 to be recognised as
     "Main St"."""
     found = _identify(
-        CivicAddress(St_Name="Mayne"),
-        ssap=[_ssap(1, St_Name="Main")],
+        CivicAddress(St_Name="Mayne", Add_Number=415),
+        ssap=[_ssap(1, St_Name="Main", Add_Number=415)],
         score=lambda q, r: (72.0, {}),
     )
 
@@ -281,8 +295,8 @@ def test_a_sparse_record_is_scored_like_any_other():
     rather than rejecting them. A null county is not a reason to withhold a
     record from the scorer."""
     found = _identify(
-        CivicAddress(A2="Burleigh", St_Name="16th"),
-        ssap=[_ssap(1, A2=None, St_Name="16th")],
+        CivicAddress(A2="Burleigh", St_Name="16th", Add_Number=415),
+        ssap=[_ssap(1, A2=None, St_Name="16th", Add_Number=415)],
     )
     assert len(found) == 1
 
@@ -330,27 +344,46 @@ def test_a_house_number_match_is_scored_and_returned_normally():
     assert [c.record.fid for c in found] == [1]
 
 
-def test_a_query_with_no_house_number_gates_nothing():
-    """The gate only fires when the query supplies Add_Number. A street-only
-    query still reaches every temporally-valid SSAP record, exactly as decision
-    61 describes — this is not a reversion to Gate 1 (§5, decision 14)."""
+def test_a_query_with_no_house_number_never_reaches_rung_1_at_all():
+    """Decision 119 — the other half of decision 69's rule. The gate answers
+    which records may answer a house-number query; this answers whether there
+    is a house-number query to answer. An address point's identity IS its
+    house number, so a street-only query has nothing for rung 1 to be an
+    answer to, and returning one would assert a house number the caller never
+    supplied and the service has no basis to choose among."""
     seen = []
 
     def recording(query, record):
         seen.append(record.fid)
         return 100.0, {}
 
-    found = _identify(
+    found = candidates.ssap_candidates(
         CivicAddress(St_Name="16th"),
-        ssap=[
+        [
             _ssap(1, Add_Number=415, St_Name="16th"),
             _ssap(2, Add_Number=999, St_Name="16th"),
         ],
         score=recording,
+        min_match_score=60.0,
     )
 
-    assert sorted(seen) == [1, 2]
-    assert sorted(c.record.fid for c in found) == [1, 2]
+    assert found == []
+    assert seen == []           # and the scorer was never called even once
+
+
+def test_rung_1_being_inapplicable_is_not_a_gate_1_refusal():
+    """§5 / decision 14 — nothing about decision 119 refuses a request. The
+    same street-only query that produces no address-point candidate is still
+    admitted, still scored against the road layer, and still answered."""
+    found = _identify(
+        CivicAddress(St_Name="16th"),
+        ssap=[_ssap(1, Add_Number=415, St_Name="16th")],
+        rcl=[_rcl(1, St_Name="16th", FromAddr_L=100, ToAddr_L=200,
+                  Parity_L="E")],
+    )
+
+    assert len(found) == 1
+    assert found[0].location_type is LocationType.STREET_SEGMENT
 
 
 def test_rcl_candidates_have_no_house_number_gate():
@@ -506,8 +539,8 @@ def test_the_floor_applies_after_scoring_not_before():
         return 20.0, {}
 
     found = _identify(
-        CivicAddress(A2="Burleigh", St_Name="16th"),
-        ssap=[_ssap(1, A2="Morton", St_Name="Nowhere")],
+        CivicAddress(A2="Burleigh", St_Name="16th", Add_Number=415),
+        ssap=[_ssap(1, A2="Morton", St_Name="Nowhere", Add_Number=415)],
         score=recording,
         min_match_score=60.0,
     )
@@ -572,10 +605,11 @@ def test_a_temporally_invalid_record_is_excluded_before_scoring():
         return 100.0, {}
 
     found = candidates.identify(
-        CivicAddress(St_Name="16th"),
+        CivicAddress(St_Name="16th", Add_Number=415),
         ssap=[
-            _ssap(1, St_Name="16th", Expire="2020-01-01T00:00:00+00:00"),
-            _ssap(2, St_Name="16th"),
+            _ssap(1, St_Name="16th", Add_Number=415,
+                  Expire="2020-01-01T00:00:00+00:00"),
+            _ssap(2, St_Name="16th", Add_Number=415),
         ],
         rcl=[],
         score=recording,
@@ -595,10 +629,12 @@ def test_a_temporally_invalid_record_is_excluded_before_scoring():
 
 def _two_points(lon_a, lat_a, lon_b, lat_b, **kw):
     return _identify(
-        CivicAddress(St_Name="16th"),
+        CivicAddress(St_Name="16th", Add_Number=415),
         ssap=[
-            _ssap(1, St_Name="16th", geometry_wkt=f"POINT ({lon_a} {lat_a})"),
-            _ssap(2, St_Name="16th", geometry_wkt=f"POINT ({lon_b} {lat_b})"),
+            _ssap(1, St_Name="16th", Add_Number=415,
+                  geometry_wkt=f"POINT ({lon_a} {lat_a})"),
+            _ssap(2, St_Name="16th", Add_Number=415,
+                  geometry_wkt=f"POINT ({lon_b} {lat_b})"),
         ],
         **kw,
     )
@@ -641,10 +677,12 @@ def test_vertical_disagreement_merges_unconditionally():
     agree horizontally and differ vertically merge however far apart they are,
     and the uncertainty spans the extent. The extent is the answer."""
     found = _identify(
-        CivicAddress(St_Name="16th"),
+        CivicAddress(St_Name="16th", Add_Number=415),
         ssap=[
-            _ssap(1, St_Name="16th", geometry_wkt="POINT Z (-100.78 46.81 500)"),
-            _ssap(2, St_Name="16th", geometry_wkt="POINT Z (-100.78 46.81 560)"),
+            _ssap(1, St_Name="16th", Add_Number=415,
+                  geometry_wkt="POINT Z (-100.78 46.81 500)"),
+            _ssap(2, St_Name="16th", Add_Number=415,
+                  geometry_wkt="POINT Z (-100.78 46.81 560)"),
         ],
     )
     merged = candidates.resolve_ambiguity(found, tolerance_m=1.0)
@@ -657,7 +695,8 @@ def test_vertical_disagreement_merges_unconditionally():
 
 def test_a_single_candidate_is_not_a_merge():
     found = _identify(
-        CivicAddress(St_Name="16th"), ssap=[_ssap(1, St_Name="16th")])
+        CivicAddress(St_Name="16th", Add_Number=415),
+        ssap=[_ssap(1, St_Name="16th", Add_Number=415)])
     merged = candidates.resolve_ambiguity(found, tolerance_m=150.0)
 
     assert merged.is_merge is False
@@ -668,7 +707,8 @@ def test_a_lone_candidate_never_triggers_ambiguity():
     """However tight the tolerance. One candidate cannot disagree with itself,
     and a tolerance of zero must not turn every single match into a 468."""
     found = _identify(
-        CivicAddress(St_Name="16th"), ssap=[_ssap(1, St_Name="16th")])
+        CivicAddress(St_Name="16th", Add_Number=415),
+        ssap=[_ssap(1, St_Name="16th", Add_Number=415)])
     assert candidates.resolve_ambiguity(found, tolerance_m=0.0).is_merge is False
 
 
@@ -678,10 +718,12 @@ def test_a_lone_candidate_never_triggers_ambiguity():
 
 def test_ranking_is_by_blended_confidence():
     found = _identify(
-        CivicAddress(St_Name="16th"),
+        CivicAddress(St_Name="16th", Add_Number=415),
         ssap=[
-            _ssap(1, St_Name="16th", geometry_wkt="POINT (-100.780 46.810)"),
-            _ssap(2, St_Name="16th", geometry_wkt="POINT (-100.781 46.810)"),
+            _ssap(1, St_Name="16th", Add_Number=415,
+                  geometry_wkt="POINT (-100.780 46.810)"),
+            _ssap(2, St_Name="16th", Add_Number=415,
+                  geometry_wkt="POINT (-100.781 46.810)"),
         ],
         score=lambda q, r: ((90.0 if r.fid == 2 else 70.0), {}),
     )
@@ -695,11 +737,134 @@ def test_ranking_is_deterministic_across_calls():
     trip is unstable for reasons that have nothing to do with the data."""
     def run():
         return [c.record.fid for c in _identify(
-            CivicAddress(St_Name="16th"),
-            ssap=[_ssap(i, St_Name="16th") for i in (3, 1, 2)],
+            CivicAddress(St_Name="16th", Add_Number=415),
+            ssap=[_ssap(i, St_Name="16th", Add_Number=415) for i in (3, 1, 2)],
         )]
 
+    # Asserted non-empty first: without a house number decision 119 returns no
+    # rung-1 candidates at all, and "[] == []" would pass while testing nothing.
+    assert len(run()) == 3
     assert run() == run()
+
+
+# ---------------------------------------------------------------------------
+# Decision 120 / Appendix C.2 item 9 — rung-3 ties broken by proximity to the
+# queried house number, where one was supplied
+# ---------------------------------------------------------------------------
+
+def test_rung_3_ties_are_broken_by_proximity_to_the_queried_house_number():
+    """Two segments on the same street both fail to place 150 (it falls in
+    the gap between their ranges) and tie at rung 3 on identical matchScore.
+    The segment whose own range sits closer to 150 must win regardless of
+    NGUID — this fixture deliberately gives the FARTHER segment the
+    alphabetically-first NGUID, so a regression back to plain NGUID
+    tie-breaking (`_rank` instead of `_rank_segments`) would flip the
+    assertion rather than passing it by accident."""
+    found = _identify(
+        CivicAddress(St_Name="16th", Add_Number=150),
+        rcl=[
+            _rcl(1, NGUID="{RCL-1-far}", St_Name="16th",
+                 FromAddr_L=200, ToAddr_L=208, Parity_L="E"),   # gap 50
+            _rcl(2, NGUID="{RCL-9-near}", St_Name="16th",
+                 FromAddr_L=100, ToAddr_L=108, Parity_L="E"),   # gap 42
+        ],
+    )
+
+    assert len(found) == 2
+    assert found[0].nguid == "{RCL-9-near}"
+
+
+def test_rung_3_ties_fall_back_to_nguid_when_the_query_has_no_house_number():
+    """Decision 120 needs a house number to measure a gap against. A query
+    with none at all — decision 119's own rung-3 shape, and Appendix C.2 item
+    9's still-open remainder — still resolves rung-3 ties by NGUID alone,
+    exactly as before this decision."""
+    found = _identify(
+        CivicAddress(St_Name="16th"),
+        rcl=[
+            _rcl(1, NGUID="{RCL-9}", St_Name="16th",
+                 FromAddr_L=200, ToAddr_L=208, Parity_L="E"),
+            _rcl(2, NGUID="{RCL-1}", St_Name="16th",
+                 FromAddr_L=100, ToAddr_L=108, Parity_L="E"),
+        ],
+    )
+
+    assert len(found) == 2
+    assert found[0].nguid == "{RCL-1}"
+
+
+# ---------------------------------------------------------------------------
+# Decision 121 / Appendix C.2 item 9's remainder — rung-3 ambiguity when the
+# query supplies no house number at all (FWD-DROPPED-HNO-STRICT-001)
+# ---------------------------------------------------------------------------
+
+def test_segment_spread_is_zero_for_a_single_candidate():
+    found = _identify(
+        CivicAddress(St_Name="16th"),
+        rcl=[_rcl(1, St_Name="16th")],
+    )
+    assert candidates._segment_spread_m(found) == 0.0
+
+
+def test_segment_spread_measures_the_geodesic_distance_between_midpoints():
+    """Two segments whose midpoints are known ahead of time — the spread must
+    equal exactly `distance_m` between them, not some other notion of
+    "how far apart" (e.g. nearest-endpoint or vertex-centroid)."""
+    found = _identify(
+        CivicAddress(St_Name="16th"),
+        rcl=[
+            _rcl(1, St_Name="16th",
+                 geometry_wkt="LINESTRING (-100.800 46.810, -100.780 46.810)"),
+            _rcl(2, St_Name="16th",
+                 geometry_wkt="LINESTRING (-100.700 46.810, -100.680 46.810)"),
+        ],
+    )
+    expected = geometry.distance_m(-100.790, 46.810, -100.690, 46.810)
+    assert candidates._segment_spread_m(found) == pytest.approx(expected, rel=1e-6)
+
+
+def test_resolve_segment_ambiguity_returns_the_leader_within_tolerance():
+    found = _identify(
+        CivicAddress(St_Name="16th"),
+        rcl=[
+            _rcl(1, NGUID="{RCL-1}", St_Name="16th",
+                 geometry_wkt="LINESTRING (-100.7800 46.8100, -100.7790 46.8100)"),
+            _rcl(2, NGUID="{RCL-2}", St_Name="16th",
+                 geometry_wkt="LINESTRING (-100.7801 46.8100, -100.7791 46.8100)"),
+        ],
+    )
+    winner = candidates.resolve_segment_ambiguity(found, tolerance_m=150.0)
+    assert winner is found[0]
+
+
+def test_resolve_segment_ambiguity_raises_beyond_tolerance():
+    """The FWD-DROPPED-HNO-STRICT-001 shape in miniature: same-named
+    segments, tied on confidence/matchScore, whose own geometries disagree
+    by tens of kilometres — not a confident single answer."""
+    found = _identify(
+        CivicAddress(St_Name="16th"),
+        rcl=[
+            _rcl(1, St_Name="16th",
+                 geometry_wkt="LINESTRING (-100.800 46.810, -100.780 46.810)"),
+            _rcl(2, St_Name="16th",
+                 geometry_wkt="LINESTRING (-101.500 46.810, -101.480 46.810)"),
+        ],
+    )
+    with pytest.raises(AmbiguousResult) as caught:
+        candidates.resolve_segment_ambiguity(found, tolerance_m=150.0)
+    assert caught.value.count == 2
+    assert caught.value.spread_m > 150.0
+
+
+def test_resolve_segment_ambiguity_is_unchanged_for_a_single_candidate():
+    """Nothing to be ambiguous about — mirrors
+    test_a_lone_candidate_never_triggers_ambiguity's positioned-rung
+    counterpart."""
+    found = _identify(
+        CivicAddress(St_Name="16th"),
+        rcl=[_rcl(1, St_Name="16th")],
+    )
+    assert candidates.resolve_segment_ambiguity(found, tolerance_m=0.0) is found[0]
 
 
 # ---------------------------------------------------------------------------
