@@ -37,6 +37,9 @@ tests/regression/golden/
 *.log
 logs/
 
+# --- Perf tool output (tools/perf_geocode_enhanced.py; real address data) ---
+perf_geocode_enhanced_*.csv
+
 # --- OS cruft ---
 .DS_Store
 Thumbs.db
